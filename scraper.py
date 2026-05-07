@@ -6,6 +6,12 @@ BASES = {}
 SPREADSHEET_ID = "14DqavAx6ov60d92rhvwy2sNEW_909MCHp421GM4q-Yk"
 BASE_SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}"
 
+# GIDS FIXES
+SHEET_GIDS = [
+    "2014365553",  # MAIN
+    "1746205606"   # TEST
+]
+
 KNOWN_SERVERS = {
     "Everlasting",
     "Excelsior",
@@ -28,14 +34,6 @@ def is_valid_code(code):
     return bool(re.match(r'^[A-Z0-9]{2,}-\d+$', code))
 
 # ---------------- GOOGLE ----------------
-def get_all_sheet_gids():
-    print("Fetching sheet list...")
-    r = requests.get(BASE_SHEET_URL)
-
-    gids = set(re.findall(r'"gid":(\d+)', r.text))
-
-    return list(gids)
-
 def load_sheet(gid):
     url = f"{BASE_SHEET_URL}/export?format=csv&gid={gid}"
 
@@ -78,7 +76,7 @@ def load_sheet(gid):
                 and not is_valid_code(c)
             ), "Unknown")
 
-            style = "TEST" if "test" in " ".join(row).lower() else ""
+            style = "TEST" if gid == "1746205606" else ""
 
             for code in codes:
                 add_base(
@@ -93,11 +91,9 @@ def load_sheet(gid):
         print("Sheet error:", e)
 
 def load_google():
-    gids = get_all_sheet_gids()
+    print(f"{len(SHEET_GIDS)} sheets configured")
 
-    print(f"{len(gids)} sheets found")
-
-    for gid in gids:
+    for gid in SHEET_GIDS:
         load_sheet(gid)
 
 # ---------------- REDDIT ----------------
