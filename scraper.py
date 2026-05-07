@@ -4,7 +4,8 @@ import re
 import os
 import time
 import random
-from datetime import datetime, timezone, timedelta
+from io import StringIO
+from datetime import datetime, timezone
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -32,7 +33,16 @@ USER_AGENTS = [
 ]
 
 ENABLE_REDDIT = os.environ.get("ENABLE_REDDIT", "true").lower() == "true"
-DEBUG_ROWS = int(os.environ.get("DEBUG_ROWS", "10"))
+ENABLE_FORUM_HC = os.environ.get("ENABLE_FORUM_HC", "true").lower() == "true"
+DEBUG_ROWS = int(os.environ.get("DEBUG_ROWS", "5"))
+
+FORUM_HC_TOPICS = [
+    "https://forums.homecomingservers.com/topic/56486-2025-homecoming-base-contest-rules-entries-thread/",
+    "https://forums.homecomingservers.com/topic/39881-2023-homecoming-base-contest-rules-entries-thread/",
+    "https://forums.homecomingservers.com/topic/1925-base-directory/",
+]
+
+KNOWN_SERVERS = ["Everlasting", "Excelsior", "Torchbearer", "Indomitable", "Reunion"]
 
 
 def make_session():
@@ -61,11 +71,19 @@ def clean(v):
 
 
 def find_codes(text):
-    return re.findall(r"\b[A-Z0-9]{2,}-\d+\b", text.upper())
+    return sorted(set(re.findall(r"\b[A-Z0-9]{2,}-\d+\b", text.upper())))
 
 
 def is_valid_code(code):
     return bool(re.match(r"^[A-Z0-9]{2,}-\d+$", code))
+
+
+def infer_server_from_text(text):
+    text_l = text.lower()
+    for server in KNOWN_SERVERS:
+        if server.lower() in text_l:
+            return server
+    return "Unknown"
 
 
 def add_base(server, name, code, style, source):
@@ -109,14 +127,15 @@ def load_sheet(gid):
 
         lines = r.text.splitlines()
         header_idx, rows = find_real_header_row(lines)
-
         print(f"Header row detected at line {header_idx + 1}")
 
-        header = rows[header_idx]
-        data_rows = rows[header_idx + 1:]
-        csv_text = "\n".join([",".join(row) for row in [header] + data_rows])
-        reader = csv.DictReader(csv_text.splitlines())
+        output = StringIO()
+        writer = csv.writer(output)
+        for row in rows[header_idx:]:
+            writer.writerow(row)
+        output.seek(0)
 
+        reader = csv.DictReader(output)
         print("CSV headers:", reader.fieldnames)
 
         for i, row in enumerate(reader, start=1):
@@ -132,12 +151,9 @@ def load_sheet(gid):
             if not code:
                 continue
 
-            if not is_valid_code(code):
-                codes = find_codes(code)
-                if not codes:
-                    continue
-            else:
-                codes = [code]
+            codes = [code] if is_valid_code(code) else find_codes(code)
+            if not codes:
+                continue
 
             style = "TEST" if gid == "1746205606" else (venue if venue else "Check Yourself")
 
@@ -189,6 +205,32 @@ def load_reddit():
                 time.sleep(attempt * 2)
 
     print("Reddit skipped after retries")
+
+
+def load_forum_hc():
+    if not ENABLE_FORUM_HC:
+        print("Forum HC disabled by config")
+        return
+
+    total = 0
+    for url in FORUM_HC_TOPICS:
+        try:
+            print(f"Loading Forum HC source {url}")
+            r = session.get(url, timeout=30)
+            r.raise_for_status()
+            text = r.text
+            codes = find_codes(text)
+            server = infer_server_from_text(text)
+
+            for code in codes:
+                add_base(server, "Forum HC Imported", code, "Check Yourself", "Forum HC")
+
+            print(f"Forum HC: {len(codes)} codes found in topic")
+            total += len(codes)
+        except Exception as e:
+            print(f"Forum HC skipped for {url}: {e}")
+
+    print(f"Forum HC total codes found: {total}")
 
 
 def chunk_list(items, size):
@@ -289,7 +331,7 @@ def patch_base(code, payload):
 def delete_base(code):
     url = f"{SUPABASE_URL}?code=eq.{code}"
     headers = supabase_headers("return=minimal")
-    r = session.delete(url, headers=headers, json={}, timeout=60)
+    r = session.delete(url, headers=headers, timeout=60)
     r.raise_for_status()
 
 
@@ -358,6 +400,7 @@ def apply_missing_rules():
 def main():
     load_google()
     load_reddit()
+    load_forum_hc()
     print(f"Total bases found in sources: {len(BASES)}")
     push_bases()
     apply_missing_rules()
