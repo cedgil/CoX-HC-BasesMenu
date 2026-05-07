@@ -23,14 +23,6 @@ SHEET_GIDS = [
     "1746205606"
 ]
 
-KNOWN_SERVERS = {
-    "Everlasting",
-    "Excelsior",
-    "Torchbearer",
-    "Indomitable",
-    "Reunion"
-}
-
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15",
@@ -81,35 +73,25 @@ def load_sheet(gid):
     try:
         r = session.get(url, timeout=30)
         r.raise_for_status()
-        reader = csv.reader(r.text.splitlines())
+        reader = csv.DictReader(r.text.splitlines())
 
         for row in reader:
-            row = [clean(x) for x in row]
+            code = clean(row.get("Base Code"))
+            name = clean(row.get("Base Name (SG / VG)"))
+            style_raw = clean(row.get("Venue"))
 
-            if not any(row):
+            if not code:
                 continue
 
-            server = next((c for c in row if c in KNOWN_SERVERS), None)
-            if not server:
-                continue
-
-            codes = find_codes(" ".join(row))
+            codes = [code] if is_valid_code(code) else find_codes(code)
             if not codes:
                 continue
 
-            name = next((
-                c for c in row
-                if c
-                and c not in KNOWN_SERVERS
-                and not any(code in c for code in codes)
-                and not c.startswith("@")
-                and not is_valid_code(c)
-            ), "Unknown")
+            style = "TEST" if gid == "1746205606" else (style_raw if style_raw else "Check Yourself")
+            server = clean(row.get("Shard")) or "Unknown"
 
-            style = "TEST" if gid == "1746205606" else ""
-
-            for code in codes:
-                add_base(server, name, code, style, "google")
+            for c in codes:
+                add_base(server, name or "Unknown", c, style, "google")
 
     except Exception as e:
         print(f"Sheet error {gid}: {e}")
