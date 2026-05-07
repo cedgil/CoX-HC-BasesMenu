@@ -70,7 +70,9 @@ def is_valid_code(code):
 def add_base(server, name, code, style, source):
     if not code:
         return
+
     code = code.strip().upper()
+
     if code not in BASES:
         BASES[code] = {
             "code": code,
@@ -79,8 +81,21 @@ def add_base(server, name, code, style, source):
             "style": clean(style),
             "sources": []
         }
+
     if source not in BASES[code]["sources"]:
         BASES[code]["sources"].append(source)
+
+
+def find_real_header_row(lines):
+    reader = csv.reader(lines)
+    rows = list(reader)
+
+    for idx, row in enumerate(rows):
+        normalized = [clean(col) for col in row]
+        if "Base Code" in normalized and "Venue" in normalized:
+            return idx, rows
+
+    raise ValueError("Impossible de trouver la vraie ligne d'en-têtes (Base Code / Venue)")
 
 
 def load_sheet(gid):
@@ -90,7 +105,18 @@ def load_sheet(gid):
     try:
         r = session.get(url, timeout=30)
         r.raise_for_status()
-        reader = csv.DictReader(r.text.splitlines())
+
+        lines = r.text.splitlines()
+        header_idx, rows = find_real_header_row(lines)
+
+        print(f"Header row detected at line {header_idx + 1}")
+
+        header = rows[header_idx]
+        data_rows = rows[header_idx + 1:]
+
+        reader = csv.DictReader(
+            [",".join(row) for row in [header] + data_rows]
+        )
 
         print("CSV headers:", reader.fieldnames)
 
@@ -98,10 +124,11 @@ def load_sheet(gid):
             code = clean(row.get("Base Code"))
             name = clean(row.get("Base Name (SG / VG)"))
             venue = clean(row.get("Venue"))
-            server = clean(row.get("Server")) or clean(row.get("Shard")) or "Unknown"
+            server = clean(row.get("Shard") or row.get("Server")) or "Unknown"
 
             if i <= DEBUG_ROWS:
-                print(f"ROW {i} | code={code} | venue={venue} | style={'TEST' if gid == '1746205606' else (venue if venue else 'Check Yourself')}")
+                style_preview = "TEST" if gid == "1746205606" else (venue if venue else "Check Yourself")
+                print(f"ROW {i} | code={code} | venue={venue} | style={style_preview}")
 
             if not code:
                 continue
