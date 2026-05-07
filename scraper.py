@@ -1,6 +1,16 @@
 import csv, requests, re, json, os
 from datetime import datetime
 
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+
+if not SUPABASE_URL:
+    raise RuntimeError("SUPABASE_URL absent")
+if not SUPABASE_KEY:
+    raise RuntimeError("SUPABASE_KEY absent")
+
+print("Secrets chargés OK")
+
 BASES = {}
 
 SPREADSHEET_ID = "14DqavAx6ov60d92rhvwy2sNEW_909MCHp421GM4q-Yk"
