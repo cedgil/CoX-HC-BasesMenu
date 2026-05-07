@@ -1,4 +1,4 @@
-name: CoX Base Scraper
+name: Mock CoX Base Scraper
 
 on:
   workflow_dispatch:
