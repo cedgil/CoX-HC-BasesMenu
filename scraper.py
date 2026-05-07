@@ -1,13 +1,14 @@
-import csv, requests, re, json, os
+import csv
+import requests
+import re
+import os
+import time
 from datetime import datetime
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
-SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
-
-if not SUPABASE_URL:
-    raise RuntimeError("SUPABASE_URL absent")
-if not SUPABASE_KEY:
-    raise RuntimeError("SUPABASE_KEY absent")
+SUPABASE_URL = os.environ["SUPABASE_URL"]
+SUPABASE_KEY = os.environ["SUPABASE_KEY"]
 
 print("Secrets chargés OK")
 
@@ -16,10 +17,9 @@ BASES = {}
 SPREADSHEET_ID = "14DqavAx6ov60d92rhvwy2sNEW_909MCHp421GM4q-Yk"
 BASE_SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}"
 
-# GIDS FIXES
 SHEET_GIDS = [
-    "2014365553",  # MAIN
-    "1746205606"   # TEST
+    "2014365553",
+    "1746205606"
 ]
 
 KNOWN_SERVERS = {
@@ -30,10 +30,21 @@ KNOWN_SERVERS = {
     "Reunion"
 }
 
-SUPABASE_URL = os.environ["SUPABASE_URL"]
-SUPABASE_KEY = os.environ["SUPABASE_KEY"]
+def make_session():
+    retry = Retry(
+        total=5,
+        backoff_factor=2,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods={"GET", "POST"}
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    session = requests.Session()
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    return session
 
-# ---------------- UTILS ----------------
+session = make_session()
+
 def clean(v):
     return (v or "").strip()
 
@@ -43,18 +54,13 @@ def find_codes(text):
 def is_valid_code(code):
     return bool(re.match(r'^[A-Z0-9]{2,}-\d+$', code))
 
-# ---------------- GOOGLE ----------------
 def load_sheet(gid):
     url = f"{BASE_SHEET_URL}/export?format=csv&gid={gid}"
-
     print(f"Loading sheet {gid}")
 
     try:
-        r = requests.get(url)
-
-        if r.status_code != 200:
-            print(f"Failed sheet {gid}")
-            return
+        r = session.get(url, timeout=30)
+        r.raise_for_status()
 
         reader = csv.reader(r.text.splitlines())
 
@@ -64,16 +70,11 @@ def load_sheet(gid):
             if not any(row):
                 continue
 
-            server = next(
-                (c for c in row if c in KNOWN_SERVERS),
-                None
-            )
-
+            server = next((c for c in row if c in KNOWN_SERVERS), None)
             if not server:
                 continue
 
             codes = find_codes(" ".join(row))
-
             if not codes:
                 continue
 
@@ -89,46 +90,33 @@ def load_sheet(gid):
             style = "TEST" if gid == "1746205606" else ""
 
             for code in codes:
-                add_base(
-                    server,
-                    name,
-                    code,
-                    style,
-                    "google"
-                )
+                add_base(server, name, code, style, "google")
 
     except Exception as e:
-        print("Sheet error:", e)
+        print(f"Sheet error {gid}: {e}")
 
 def load_google():
     print(f"{len(SHEET_GIDS)} sheets configured")
-
     for gid in SHEET_GIDS:
         load_sheet(gid)
 
-# ---------------- REDDIT ----------------
 def load_reddit():
     try:
-        r = requests.get(
+        r = session.get(
             "https://www.reddit.com/r/Cityofheroes/.json",
-            headers={"User-Agent": "Mozilla"}
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=30
         )
+        r.raise_for_status()
 
         matches = find_codes(r.text)
 
         for code in matches:
-            add_base(
-                "Unknown",
-                "Reddit Found",
-                code,
-                "",
-                "reddit"
-            )
+            add_base("Unknown", "Reddit Found", code, "", "reddit")
 
-    except:
-        print("Reddit failed")
+    except Exception as e:
+        print("Reddit failed:", e)
 
-# ---------------- ADD BASE ----------------
 def add_base(server, name, code, style, source):
     if not code:
         return
@@ -147,47 +135,59 @@ def add_base(server, name, code, style, source):
     if source not in BASES[code]["sources"]:
         BASES[code]["sources"].append(source)
 
-# ---------------- PUSH SUPABASE ----------------
-def push_bases():
+def chunk_list(items, size):
+    for i in range(0, len(items), size):
+        yield items[i:i + size]
+
+def push_batch(batch, attempt_limit=5):
     url = f"{SUPABASE_URL}?on_conflict=code"
 
     headers = {
         "apikey": SUPABASE_KEY,
         "Authorization": f"Bearer {SUPABASE_KEY}",
         "Content-Type": "application/json",
-        "Prefer": "resolution=merge-duplicates"
+        "Prefer": "resolution=merge-duplicates,return=representation"
     }
 
-    data = []
+    for attempt in range(1, attempt_limit + 1):
+        r = session.post(url, headers=headers, json=batch, timeout=60)
 
-    for b in BASES.values():
-        data.append({
-            "code": b["code"],
-            "server": b["server"],
-            "name": b["name"],
-            "style": b["style"],
-            "sources": b["sources"],
-            "updated_at": datetime.utcnow().isoformat()
-        })
+        print(f"Batch status: {r.status_code}")
+
+        if r.ok:
+            return
+
+        print(r.text)
+
+        if r.status_code == 503 and "PGRST002" in r.text and attempt < attempt_limit:
+            wait_time = attempt * 5
+            print(f"PGRST002 detected, retry in {wait_time}s...")
+            time.sleep(wait_time)
+            continue
+
+        r.raise_for_status()
+
+def push_bases():
+    data = [{
+        "code": b["code"],
+        "server": b["server"],
+        "name": b["name"],
+        "style": b["style"],
+        "sources": b["sources"],
+        "updated_at": datetime.utcnow().isoformat()
+    } for b in BASES.values()]
 
     print(f"Pushing {len(data)} bases to Supabase")
 
-    r = requests.post(
-        url,
-        headers=headers,
-        json=data
-    )
+    batch_size = 200
+    for idx, batch in enumerate(chunk_list(data, batch_size), start=1):
+        print(f"Pushing batch {idx} ({len(batch)} rows)")
+        push_batch(batch)
 
-    print(r.status_code)
-    print(r.text)
-
-# ---------------- MAIN ----------------
 def main():
     load_google()
     load_reddit()
-
     print(f"Total bases: {len(BASES)}")
-
     push_bases()
 
 if __name__ == "__main__":
