@@ -4,7 +4,7 @@ import re
 import os
 import time
 import random
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -14,6 +14,7 @@ SUPABASE_KEY = os.environ["SUPABASE_KEY"]
 print("Secrets chargés OK")
 
 BASES = {}
+NOW = datetime.now(timezone.utc)
 
 SPREADSHEET_ID = "14DqavAx6ov60d92rhvwy2sNEW_909MCHp421GM4q-Yk"
 BASE_SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}"
@@ -42,7 +43,7 @@ def make_session():
         status=4,
         backoff_factor=2,
         status_forcelist=[429, 500, 502, 503, 504],
-        allowed_methods=frozenset(["GET", "POST"]),
+        allowed_methods=frozenset(["GET", "POST", "PATCH", "DELETE"]),
         raise_on_status=False,
     )
     adapter = HTTPAdapter(max_retries=retry)
@@ -113,10 +114,8 @@ def load_sheet(gid):
 
         header = rows[header_idx]
         data_rows = rows[header_idx + 1:]
-
-        reader = csv.DictReader(
-            [",".join(row) for row in [header] + data_rows]
-        )
+        csv_text = "\n".join([",".join(row) for row in [header] + data_rows])
+        reader = csv.DictReader(csv_text.splitlines())
 
         print("CSV headers:", reader.fieldnames)
 
@@ -197,15 +196,20 @@ def chunk_list(items, size):
         yield items[i:i + size]
 
 
-def push_batch(batch, batch_num, attempt_limit=3):
-    url = f"{SUPABASE_URL}?on_conflict=code"
-
+def supabase_headers(prefer=None):
     headers = {
         "apikey": SUPABASE_KEY,
         "Authorization": f"Bearer {SUPABASE_KEY}",
-        "Content-Type": "application/json",
-        "Prefer": "resolution=merge-duplicates"
+        "Content-Type": "application/json"
     }
+    if prefer:
+        headers["Prefer"] = prefer
+    return headers
+
+
+def push_batch(batch, batch_num, attempt_limit=3):
+    url = f"{SUPABASE_URL}?on_conflict=code"
+    headers = supabase_headers("resolution=merge-duplicates")
 
     for attempt in range(1, attempt_limit + 1):
         try:
@@ -224,12 +228,11 @@ def push_batch(batch, batch_num, attempt_limit=3):
         if r.ok:
             return
 
-        if r.status_code == 503 and "PGRST002" in r.text:
-            if attempt < attempt_limit:
-                wait_time = attempt * 15
-                print(f"Batch {batch_num}: schema cache indisponible, retry dans {wait_time}s")
-                time.sleep(wait_time)
-                continue
+        if r.status_code == 503 and "PGRST002" in r.text and attempt < attempt_limit:
+            wait_time = attempt * 15
+            print(f"Batch {batch_num}: schema cache indisponible, retry dans {wait_time}s")
+            time.sleep(wait_time)
+            continue
 
         r.raise_for_status()
 
@@ -243,7 +246,10 @@ def push_bases():
             "name": b["name"],
             "style": b["style"],
             "sources": b["sources"],
-            "updated_at": datetime.utcnow().isoformat()
+            "updated_at": NOW.isoformat(),
+            "last_seen_at": NOW.isoformat(),
+            "missing_since": None,
+            "is_missing": False
         })
 
     print(f"Pushing {len(data)} bases to Supabase")
@@ -254,11 +260,107 @@ def push_bases():
         push_batch(batch, idx)
 
 
+def fetch_existing_bases():
+    all_rows = []
+    offset = 0
+    limit = 1000
+
+    while True:
+        url = f"{SUPABASE_URL}?select=code,style,last_seen_at,missing_since,is_missing&offset={offset}&limit={limit}"
+        r = session.get(url, headers=supabase_headers(), timeout=60)
+        r.raise_for_status()
+        rows = r.json()
+        all_rows.extend(rows)
+        if len(rows) < limit:
+            break
+        offset += limit
+
+    print(f"Existing bases in DB: {len(all_rows)}")
+    return all_rows
+
+
+def patch_base(code, payload):
+    url = f"{SUPABASE_URL}?code=eq.{code}"
+    headers = supabase_headers("return=minimal")
+    r = session.patch(url, headers=headers, json=payload, timeout=60)
+    r.raise_for_status()
+
+
+def delete_base(code):
+    url = f"{SUPABASE_URL}?code=eq.{code}"
+    headers = supabase_headers("return=minimal")
+    r = session.delete(url, headers=headers, json={}, timeout=60)
+    r.raise_for_status()
+
+
+def apply_missing_rules():
+    existing = fetch_existing_bases()
+    found_codes = set(BASES.keys())
+
+    no_action_count = 0
+    dead_or_not_count = 0
+    deleted_count = 0
+    newly_missing_count = 0
+    restored_count = 0
+
+    for row in existing:
+        code = row.get("code")
+        if not code:
+            continue
+
+        if code in found_codes:
+            if row.get("is_missing") or row.get("missing_since"):
+                patch_base(code, {
+                    "is_missing": False,
+                    "missing_since": None,
+                    "last_seen_at": NOW.isoformat()
+                })
+                restored_count += 1
+            continue
+
+        missing_since_raw = row.get("missing_since")
+
+        if not missing_since_raw:
+            patch_base(code, {
+                "is_missing": True,
+                "missing_since": NOW.isoformat()
+            })
+            newly_missing_count += 1
+            continue
+
+        missing_since = datetime.fromisoformat(missing_since_raw.replace("Z", "+00:00"))
+        missing_days = (NOW - missing_since).days
+
+        if missing_days <= 5:
+            no_action_count += 1
+            continue
+
+        if 5 < missing_days < 30:
+            if row.get("style") != "DEAD-OR-NOT":
+                patch_base(code, {
+                    "is_missing": True,
+                    "style": "DEAD-OR-NOT"
+                })
+            dead_or_not_count += 1
+            continue
+
+        if missing_days >= 30:
+            delete_base(code)
+            deleted_count += 1
+
+    print(
+        f"Missing tracking: newly_missing={newly_missing_count}, "
+        f"no_action={no_action_count}, dead_or_not={dead_or_not_count}, "
+        f"restored={restored_count}, deleted={deleted_count}"
+    )
+
+
 def main():
     load_google()
     load_reddit()
-    print(f"Total bases: {len(BASES)}")
+    print(f"Total bases found in sources: {len(BASES)}")
     push_bases()
+    apply_missing_rules()
 
 
 if __name__ == "__main__":
