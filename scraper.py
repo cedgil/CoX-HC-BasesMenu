@@ -31,6 +31,7 @@ USER_AGENTS = [
 ]
 
 ENABLE_REDDIT = os.environ.get("ENABLE_REDDIT", "true").lower() == "true"
+DEBUG_ROWS = int(os.environ.get("DEBUG_ROWS", "10"))
 
 
 def make_session():
@@ -66,6 +67,22 @@ def is_valid_code(code):
     return bool(re.match(r"^[A-Z0-9]{2,}-\d+$", code))
 
 
+def add_base(server, name, code, style, source):
+    if not code:
+        return
+    code = code.strip().upper()
+    if code not in BASES:
+        BASES[code] = {
+            "code": code,
+            "server": clean(server) or "Unknown",
+            "name": clean(name) or "Unknown",
+            "style": clean(style),
+            "sources": []
+        }
+    if source not in BASES[code]["sources"]:
+        BASES[code]["sources"].append(source)
+
+
 def load_sheet(gid):
     url = f"{BASE_SHEET_URL}/export?format=csv&gid={gid}"
     print(f"Loading sheet {gid}")
@@ -75,20 +92,28 @@ def load_sheet(gid):
         r.raise_for_status()
         reader = csv.DictReader(r.text.splitlines())
 
-        for row in reader:
+        print("CSV headers:", reader.fieldnames)
+
+        for i, row in enumerate(reader, start=1):
             code = clean(row.get("Base Code"))
             name = clean(row.get("Base Name (SG / VG)"))
-            style_raw = clean(row.get("Venue"))
+            venue = clean(row.get("Venue"))
+            server = clean(row.get("Server")) or clean(row.get("Shard")) or "Unknown"
+
+            if i <= DEBUG_ROWS:
+                print(f"ROW {i} | code={code} | venue={venue} | style={'TEST' if gid == '1746205606' else (venue if venue else 'Check Yourself')}")
 
             if not code:
                 continue
 
-            codes = [code] if is_valid_code(code) else find_codes(code)
-            if not codes:
-                continue
+            if not is_valid_code(code):
+                codes = find_codes(code)
+                if not codes:
+                    continue
+            else:
+                codes = [code]
 
-            style = "TEST" if gid == "1746205606" else (style_raw if style_raw else "Check Yourself")
-            server = clean(row.get("Shard")) or "Unknown"
+            style = "TEST" if gid == "1746205606" else (venue if venue else "Check Yourself")
 
             for c in codes:
                 add_base(server, name or "Unknown", c, style, "google")
@@ -138,25 +163,6 @@ def load_reddit():
                 time.sleep(attempt * 2)
 
     print("Reddit skipped after retries")
-
-
-def add_base(server, name, code, style, source):
-    if not code:
-        return
-
-    code = code.strip().upper()
-
-    if code not in BASES:
-        BASES[code] = {
-            "code": code,
-            "server": clean(server) or "Unknown",
-            "name": clean(name) or "Unknown",
-            "style": style or "",
-            "sources": []
-        }
-
-    if source not in BASES[code]["sources"]:
-        BASES[code]["sources"].append(source)
 
 
 def chunk_list(items, size):
