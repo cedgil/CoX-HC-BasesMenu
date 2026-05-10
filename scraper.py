@@ -5,7 +5,8 @@ import os
 import json
 import time
 import random
-from datetime import datetime, timezone, timedelta
+
+from datetime import datetime, timezone
 from collections import defaultdict
 
 # =========================================================
@@ -23,10 +24,29 @@ BASE_SHEET_URL = (
     f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}"
 )
 
-# NORMAL + TEST
+# =========================================================
+# GOOGLE SHEETS
+# =========================================================
+
 SHEETS = {
-    "2014365553": "NORMAL",
-    "1746205606": "TEST"
+
+    # VERIFIED
+    "2014365553": {
+        "name": "NORMAL",
+        "category": "verified"
+    },
+
+    # TEST
+    "1746205606": {
+        "name": "TEST",
+        "category": "test"
+    },
+
+    # REQUEST PENDING
+    "1332493366": {
+        "name": "PENDING",
+        "category": "pending"
+    }
 }
 
 ENABLE_REDDIT = False
@@ -57,8 +77,13 @@ STYLE_SCORES = {
     "Tech": 5,
     "Maze": 5,
     "Utilities": 5,
-    "Check Yourself": 2,
-    "TEST": 1
+    "Check Yourself": 2
+}
+
+CATEGORY_SCORES = {
+    "verified": 10,
+    "test": 2,
+    "pending": 1
 }
 
 HUB_KEYWORDS = [
@@ -88,10 +113,13 @@ def clean(v):
 
 
 def is_valid_code(code):
-    return bool(re.match(r"^[A-Z0-9]{2,}-\d+$", code.upper()))
+    return bool(
+        re.match(r"^[A-Z0-9]{2,}-\d+$", code.upper())
+    )
 
 
 def find_codes(text):
+
     return re.findall(
         r"\b[A-Z0-9]{2,}-\d+\b",
         (text or "").upper()
@@ -99,9 +127,10 @@ def find_codes(text):
 
 
 def contains_keyword(text, keywords):
-    t = (text or "").lower()
-    return any(k in t for k in keywords)
 
+    t = (text or "").lower()
+
+    return any(k in t for k in keywords)
 
 # =========================================================
 # BASE STORAGE
@@ -113,6 +142,7 @@ def add_base(
     code,
     style,
     source,
+    category="verified",
     venue="",
     tag1="",
     tag2=""
@@ -129,10 +159,16 @@ def add_base(
     if code not in BASES:
 
         BASES[code] = {
+
             "code": code,
+
             "server": clean(server) or "Unknown",
+
             "name": clean(name) or "Unknown",
+
             "style": clean(style) or "Check Yourself",
+
+            "category": category,
 
             "venue": clean(venue),
             "tag1": clean(tag1),
@@ -144,8 +180,8 @@ def add_base(
         }
 
     if source not in BASES[code]["sources"]:
-        BASES[code]["sources"].append(source)
 
+        BASES[code]["sources"].append(source)
 
 # =========================================================
 # GOOGLE PARSER
@@ -166,14 +202,16 @@ def find_header(rows):
     return -1
 
 
-def load_google_sheet(gid, sheet_type):
+def load_google_sheet(gid, sheet_info):
+
+    category = sheet_info["category"]
 
     url = (
         f"{BASE_SHEET_URL}"
         f"/export?format=csv&gid={gid}"
     )
 
-    print(f"Loading Google Sheet {gid}")
+    print(f"Loading Google Sheet {gid} ({category})")
 
     try:
 
@@ -188,6 +226,7 @@ def load_google_sheet(gid, sheet_type):
         header_index = find_header(rows)
 
         if header_index < 0:
+
             print(f"Header not found for {gid}")
             return
 
@@ -204,13 +243,17 @@ def load_google_sheet(gid, sheet_type):
 
         for row in reader:
 
-            raw_code = clean(row.get("Base Code"))
+            raw_code = clean(
+                row.get("Base Code")
+            )
 
             name = clean(
                 row.get("Base Name (SG / VG)")
             )
 
-            venue = clean(row.get("Venue"))
+            venue = clean(
+                row.get("Venue")
+            )
 
             tag1 = clean(
                 row.get("Description Tag1")
@@ -235,9 +278,6 @@ def load_google_sheet(gid, sheet_type):
 
             style = venue if venue else "Check Yourself"
 
-            if sheet_type == "TEST":
-                style = "TEST"
-
             for code in codes:
 
                 add_base(
@@ -246,6 +286,7 @@ def load_google_sheet(gid, sheet_type):
                     code=code,
                     style=style,
                     source="google",
+                    category=category,
                     venue=venue,
                     tag1=tag1,
                     tag2=tag2
@@ -255,15 +296,20 @@ def load_google_sheet(gid, sheet_type):
 
         print(f"Google sheet error {gid}: {e}")
 
+# =========================================================
+# GOOGLE LOAD
+# =========================================================
 
 def load_google():
 
     print(f"{len(SHEETS)} sheets configured")
 
-    for gid, sheet_type in SHEETS.items():
+    for gid, sheet_info in SHEETS.items():
 
-        load_google_sheet(gid, sheet_type)
-
+        load_google_sheet(
+            gid,
+            sheet_info
+        )
 
 # =========================================================
 # REDDIT
@@ -272,6 +318,7 @@ def load_google():
 def load_reddit():
 
     if not ENABLE_REDDIT:
+
         print("Reddit disabled")
         return
 
@@ -297,6 +344,7 @@ def load_reddit():
         )
 
         if r.status_code == 403:
+
             print("Reddit blocked")
             return
 
@@ -309,7 +357,8 @@ def load_reddit():
                 name="Reddit Found",
                 code=code,
                 style="Check Yourself",
-                source="reddit"
+                source="reddit",
+                category="verified"
             )
 
         print(f"Reddit: {len(matches)} codes")
@@ -317,7 +366,6 @@ def load_reddit():
     except Exception as e:
 
         print(f"Reddit error: {e}")
-
 
 # =========================================================
 # SCORING
@@ -328,7 +376,7 @@ def compute_score(base):
     score = 0
 
     # -------------------------
-    # DATA QUALITY
+    # QUALITY
     # -------------------------
 
     if base["server"] in VALID_SERVERS:
@@ -338,18 +386,12 @@ def compute_score(base):
 
     if base["name"]:
         score += 5
-    else:
-        score -= 5
 
     if base["style"]:
         score += 5
-    else:
-        score -= 5
 
     if is_valid_code(base["code"]):
         score += 5
-    else:
-        score -= 5
 
     # -------------------------
     # SOURCES
@@ -358,39 +400,8 @@ def compute_score(base):
     if "google" in base["sources"]:
         score += 20
 
-    if "github" in base["sources"]:
-        score += 12
-
     if "reddit" in base["sources"]:
-        score += 6
-
-    if "userbase" in base["sources"]:
-        score += 3
-
-    source_count = len(base["sources"])
-
-    if source_count == 2:
         score += 5
-
-    elif source_count == 3:
-        score += 10
-
-    elif source_count >= 4:
-        score += 15
-
-    # -------------------------
-    # HUB DETECTION
-    # -------------------------
-
-    search_text = " ".join([
-        base["name"],
-        base["venue"],
-        base["tag1"],
-        base["tag2"]
-    ]).lower()
-
-    if contains_keyword(search_text, HUB_KEYWORDS):
-        score += 7
 
     # -------------------------
     # STYLE
@@ -402,18 +413,38 @@ def compute_score(base):
     )
 
     # -------------------------
-    # BAD WORDS
+    # CATEGORY
     # -------------------------
 
-    text = (
-        f'{base["name"]} {base["code"]}'
-    ).lower()
+    score += CATEGORY_SCORES.get(
+        base["category"],
+        0
+    )
 
-    if any(w in text for w in BAD_WORDS):
-        score -= 20
+    # -------------------------
+    # HUB DETECTION
+    # -------------------------
+
+    search_text = " ".join([
+
+        base["name"],
+        base["venue"],
+        base["tag1"],
+        base["tag2"]
+
+    ]).lower()
+
+    if contains_keyword(
+        search_text,
+        HUB_KEYWORDS
+    ):
+        score += 7
 
     return max(score, 0)
 
+# =========================================================
+# NORMALIZE
+# =========================================================
 
 def normalize_scores():
 
@@ -443,7 +474,6 @@ def normalize_scores():
 
         base["score"] = normalized
 
-
 # =========================================================
 # SUPABASE
 # =========================================================
@@ -457,13 +487,11 @@ def supabase_headers():
         "Prefer": "resolution=merge-duplicates"
     }
 
-
 def chunk_list(items, size):
 
     for i in range(0, len(items), size):
 
         yield items[i:i + size]
-
 
 def push_bases():
 
@@ -483,6 +511,7 @@ def push_bases():
             "server": base["server"],
             "name": base["name"],
             "style": base["style"],
+            "category": base["category"],
 
             "venue": base["venue"],
             "tag1": base["tag1"],
@@ -501,17 +530,7 @@ def push_bases():
 
     print(f"Pushing {len(payload)} bases")
 
-    batch_size = 100
-
-    for idx, batch in enumerate(
-        chunk_list(payload, batch_size),
-        start=1
-    ):
-
-        print(
-            f"Pushing batch {idx} "
-            f"({len(batch)} rows)"
-        )
+    for batch in chunk_list(payload, 100):
 
         r = requests.post(
             url,
@@ -521,148 +540,6 @@ def push_bases():
         )
 
         print(r.status_code)
-
-        if r.text:
-            print(r.text[:300])
-
-
-# =========================================================
-# DEAD TRACKING
-# =========================================================
-
-def fetch_existing():
-
-    url = (
-        f"{SUPABASE_URL}"
-        f"?select=code,style,"
-        f"missing_since,is_missing"
-    )
-
-    r = requests.get(
-        url,
-        headers=supabase_headers(),
-        timeout=60
-    )
-
-    r.raise_for_status()
-
-    return r.json()
-
-
-def patch_base(code, payload):
-
-    url = (
-        f"{SUPABASE_URL}"
-        f"?code=eq.{code}"
-    )
-
-    r = requests.patch(
-        url,
-        headers=supabase_headers(),
-        json=payload,
-        timeout=60
-    )
-
-    r.raise_for_status()
-
-
-def delete_base(code):
-
-    url = (
-        f"{SUPABASE_URL}"
-        f"?code=eq.{code}"
-    )
-
-    r = requests.delete(
-        url,
-        headers=supabase_headers(),
-        timeout=60
-    )
-
-    r.raise_for_status()
-
-
-def apply_missing_rules():
-
-    existing = fetch_existing()
-
-    found_codes = set(BASES.keys())
-
-    for row in existing:
-
-        code = row.get("code")
-
-        if not code:
-            continue
-
-        # -------------------------
-        # FOUND AGAIN
-        # -------------------------
-
-        if code in found_codes:
-
-            if (
-                row.get("is_missing")
-                or row.get("missing_since")
-            ):
-
-                patch_base(code, {
-
-                    "is_missing": False,
-
-                    "missing_since": None,
-
-                    "last_seen_at": NOW.isoformat()
-                })
-
-            continue
-
-        # -------------------------
-        # NEW MISSING
-        # -------------------------
-
-        missing_since = row.get("missing_since")
-
-        if not missing_since:
-
-            patch_base(code, {
-
-                "is_missing": True,
-
-                "missing_since": NOW.isoformat()
-            })
-
-            continue
-
-        # -------------------------
-        # DEAD OR NOT
-        # -------------------------
-
-        dt = datetime.fromisoformat(
-            missing_since.replace("Z", "+00:00")
-        )
-
-        days = (NOW - dt).days
-
-        if 5 < days < 30:
-
-            if row.get("style") != "DEAD-OR-NOT":
-
-                patch_base(code, {
-
-                    "style": "DEAD-OR-NOT",
-
-                    "is_missing": True
-                })
-
-        # -------------------------
-        # DELETE
-        # -------------------------
-
-        if days >= 30:
-
-            delete_base(code)
-
 
 # =========================================================
 # MAIN
@@ -683,10 +560,7 @@ def main():
 
     push_bases()
 
-    apply_missing_rules()
-
     print("Done")
-
 
 if __name__ == "__main__":
 
