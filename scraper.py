@@ -166,26 +166,33 @@ def find_header(rows):
 
     for idx, row in enumerate(rows):
 
-        normalized = [clean(c) for c in row]
+        normalized = [
+            clean(c).strip().upper()
+            for c in row
+        ]
 
-        upper = [c.upper() for c in normalized]
+        # =================================================
+        # FLEXIBLE FORMAT DETECTION
+        # =================================================
 
-        # VERIFIED / TEST
-        if (
-            "BASE CODE" in upper
-            and (
-                "BASE NAME (SG / VG)" in upper
-                or "VENUE" in upper
-            )
-        ):
-            return idx
+        has_code = (
+            "BASE CODE" in normalized
+            or "CODE" in normalized
+        )
 
-        # PENDING
-        if (
-            "CODE" in upper
-            and "NAME" in upper
-            and "SHARD" in upper
-        ):
+        has_name = (
+            "BASE NAME (SG / VG)" in normalized
+            or "BASE NAME" in normalized
+            or "NAME" in normalized
+        )
+
+        has_server = (
+            "SHARD" in normalized
+            or "SERVER" in normalized
+        )
+
+        if has_code and has_name and has_server:
+
             return idx
 
     return -1
@@ -254,111 +261,90 @@ def load_google_sheet(gid, category):
 
         for row in reader:
 
-            upper_keys = {
-                (k or "").upper(): v
-                for k, v in row.items()
-            }
-
             # =================================================
-            # VERIFIED / TEST
+            # FLEXIBLE COLUMN ACCESS
             # =================================================
 
-            if category in ["verified", "test"]:
+            raw_code = clean(
+                row.get("Base Code")
+                or row.get("BASE CODE")
+                or row.get("Code")
+                or row.get("CODE")
+            )
 
-                raw_code = clean(
-                    upper_keys.get("BASE CODE")
-                )
+            name = clean(
+                row.get("Base Name (SG / VG)")
+                or row.get("BASE NAME (SG / VG)")
+                or row.get("Base Name")
+                or row.get("BASE NAME")
+                or row.get("Name")
+                or row.get("NAME")
+            )
 
-                name = clean(
-                    upper_keys.get("BASE NAME (SG / VG)")
-                )
+            server = clean(
+                row.get("Shard")
+                or row.get("SHARD")
+                or row.get("Server")
+                or row.get("SERVER")
+            )
 
-                venue = clean(
-                    upper_keys.get("VENUE")
-                )
+            venue = clean(
+                row.get("Venue")
+                or row.get("VENUE")
+            )
 
-                tag1 = clean(
-                    upper_keys.get("DESCRIPTION TAG1")
-                )
+            tag1 = clean(
+                row.get("Description Tag1")
+                or row.get("DESCRIPTION TAG1")
+                or row.get("DESCRIPTION 1")
+            )
 
-                tag2 = clean(
-                    upper_keys.get("DESCRIPTION TAG2")
-                )
+            tag2 = clean(
+                row.get("Description Tag2")
+                or row.get("DESCRIPTION TAG2")
+                or row.get("DESCRIPTION 2")
+            )
 
-                server = clean(
-                    upper_keys.get("SHARD")
-                    or upper_keys.get("SERVER")
-                )
+            if not raw_code:
+                continue
 
-                if not raw_code:
-                    continue
+            codes = find_codes(raw_code)
 
-                codes = find_codes(raw_code)
-
-                if not codes:
-                    continue
-
-                style = venue if venue else "Check Yourself"
-
-                if category == "test":
-                    style = "TEST"
-
-                for code in codes:
-
-                    added = add_base(
-                        server=server,
-                        name=name,
-                        code=code,
-                        style=style,
-                        category=category,
-                        source="google",
-                        venue=venue,
-                        tag1=tag1,
-                        tag2=tag2
-                    )
-
-                    if added:
-                        added_count += 1
+            if not codes:
+                continue
 
             # =================================================
-            # PENDING
+            # CATEGORY STYLE OVERRIDE
             # =================================================
+
+            if category == "test":
+
+                style = "TEST"
 
             elif category == "pending":
 
-                raw_code = clean(
-                    upper_keys.get("CODE")
+                style = "Pending"
+
+            else:
+
+                style = venue if venue else "Check Yourself"
+
+            for code in codes:
+
+                added = add_base(
+                    server=server,
+                    name=name,
+                    code=code,
+                    style=style,
+                    category=category,
+                    source="google",
+                    venue=venue,
+                    tag1=tag1,
+                    tag2=tag2
                 )
 
-                name = clean(
-                    upper_keys.get("NAME")
-                )
-
-                server = clean(
-                    upper_keys.get("SHARD")
-                )
-
-                if not raw_code:
-                    continue
-
-                codes = find_codes(raw_code)
-
-                if not codes:
-                    continue
-
-                for code in codes:
-
-                    added = add_base(
-                        server=server,
-                        name=name,
-                        code=code,
-                        style="Pending",
-                        category="pending",
-                        source="google"
-                    )
-
-                    if added:
-                        added_count += 1
+                if added:
+                    added_count += 1
 
         print(f"ADDED {added_count} BASES FROM {gid}")
 
