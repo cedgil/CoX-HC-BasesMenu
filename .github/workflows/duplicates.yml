@@ -1,4 +1,4 @@
-name: Mock CoX Base Scraper
+name: TEST Duplicates
 
 on:
   workflow_dispatch:
@@ -26,4 +26,4 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-        run: python mock_scraper.py
+        run: python duplicates.py
