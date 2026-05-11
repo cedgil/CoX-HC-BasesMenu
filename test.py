@@ -1,16 +1,15 @@
 import csv
+import re
 import requests
 from collections import defaultdict
 from io import StringIO
 
 SPREADSHEET_ID = "14DqavAx6ov60d92rhvwy2sNEW_909MCHp421GM4q-Yk"
-
 SHEETS = [
     {"name": "Pending", "gid": "1332493366"},
     {"name": "VERIFIED", "gid": "2014365553"},
     {"name": "TEST", "gid": "1746205606"},
 ]
-
 BASE_URL = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/export?format=csv&gid="
 
 
@@ -18,9 +17,12 @@ def clean(v):
     return (v or "").strip()
 
 
+def norm(v):
+    return re.sub(r"\s+", " ", clean(v)).strip().lower()
+
+
 def fetch_sheet(gid):
-    url = BASE_URL + gid
-    r = requests.get(url, timeout=30)
+    r = requests.get(BASE_URL + gid, timeout=30)
     r.raise_for_status()
     return r.text
 
@@ -28,10 +30,19 @@ def fetch_sheet(gid):
 def find_header_row(lines):
     rows = list(csv.reader(lines))
     for i, row in enumerate(rows):
-        norm = [clean(c) for c in row]
-        if "Base Code" in norm and ("Shard" in norm or "Server" in norm):
+        normalized = [norm(c) for c in row]
+        has_code = any(c in normalized for c in ["base code", "passcode", "code"])
+        has_server = any(c in normalized for c in ["shard", "server", "homecoming server"])
+        if has_code and has_server:
             return i, rows
     raise ValueError("Header row not found")
+
+
+def pick(row, *keys):
+    for k in keys:
+        if k in row and clean(row.get(k)):
+            return clean(row.get(k))
+    return ""
 
 
 def parse_sheet(sheet_name, gid):
@@ -46,54 +57,50 @@ def parse_sheet(sheet_name, gid):
     sio.seek(0)
 
     reader = csv.DictReader(sio)
-
     result = []
+
     for row in reader:
-        code = clean(row.get("Base Code"))
+        code = pick(row, "Base Code", "Passcode", "Code")
         if not code:
             continue
 
-        server = clean(row.get("Shard") or row.get("Server") or "Unknown")
-        name = clean(row.get("Base Name (SG / VG)") or row.get("Base Name") or "")
+        server = pick(row, "Shard", "Server", "Homecoming Server")
+        if not server:
+            server = "Unknown"
+
         result.append({
             "sheet": sheet_name,
             "code": code.upper(),
             "server": server,
-            "name": name,
         })
+
     return result
 
 
 def main():
     all_rows = []
+
     for s in SHEETS:
-        rows = parse_sheet(s["name"], s["gid"])
-        all_rows.extend(rows)
-        print(f"{s['name']}: {len(rows)} rows parsed")
+        try:
+            rows = parse_sheet(s["name"], s["gid"])
+            all_rows.extend(rows)
+            print(f"{s['name']}: {len(rows)} rows parsed")
+        except Exception as e:
+            print(f"{s['name']}: ERROR - {e}")
 
     by_code = defaultdict(list)
     for row in all_rows:
         by_code[row["code"]].append(row)
 
-    duplicates = []
-    for code, rows in by_code.items():
-        servers = sorted({r["server"] for r in rows if r["server"]})
+    found = False
+    for code in sorted(by_code.keys()):
+        servers = sorted({r["server"] for r in by_code[code] if r["server"]})
         if len(servers) >= 2:
-            duplicates.append({
-                "code": code,
-                "servers": servers,
-                "count_servers": len(servers),
-                "count_rows": len(rows),
-            })
+            found = True
+            print(f"{code} => {', '.join(servers)}")
 
-    duplicates.sort(key=lambda x: (-x["count_servers"], x["code"]))
-
-    print()
-    print(f"Passcodes présents sur plusieurs serveurs : {len(duplicates)}")
-    print()
-
-    for d in duplicates:
-        print(f"{d['code']} => {', '.join(d['servers'])} (rows={d['count_rows']})")
+    if not found:
+        print("Aucun passcode dupliqué sur des serveurs différents.")
 
 
 if __name__ == "__main__":
