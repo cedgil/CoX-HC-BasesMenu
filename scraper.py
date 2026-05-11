@@ -2,7 +2,6 @@ import csv
 import requests
 import re
 import os
-import random
 from datetime import datetime, timezone
 
 # =========================================================
@@ -74,6 +73,7 @@ def normalize_header(v):
 
 
 def is_valid_code(code):
+
     return bool(
         re.match(
             r"^[A-Z0-9]{2,}-\d+$",
@@ -139,6 +139,7 @@ def add_base(
         }
 
     if source not in BASES[code]["sources"]:
+
         BASES[code]["sources"].append(source)
 
 # =========================================================
@@ -156,9 +157,18 @@ def find_header(rows):
 
         joined = " | ".join(normalized)
 
+        # VERIFIED / TEST
         if (
             "base code" in joined
             or "passcode" in joined
+        ):
+            return idx
+
+        # PENDING
+        if (
+            "shard" in joined
+            and "code" in joined
+            and "name" in joined
         ):
             return idx
 
@@ -178,6 +188,7 @@ def find_value(row, possible_keys):
     for key in possible_keys:
 
         if key in normalized:
+
             return clean(normalized[key])
 
     return ""
@@ -212,7 +223,9 @@ def load_google_sheet(gid, sheet_category):
 
         if header_index < 0:
 
-            print(f"HEADER NOT FOUND FOR {gid}")
+            print(
+                f"SKIPPING EMPTY SHEET {gid}"
+            )
 
             return
 
@@ -243,39 +256,91 @@ def load_google_sheet(gid, sheet_category):
 
         for row in reader:
 
-            raw_code = find_value(row, [
-                "base code",
-                "passcode",
-                "code"
-            ])
+            # =============================================
+            # PENDING FORMAT
+            # =============================================
 
-            name = find_value(row, [
-                "base name (sg / vg)",
-                "base name",
-                "sg name",
-                "name"
-            ])
+            if sheet_category == "pending":
 
-            venue = find_value(row, [
-                "venue",
-                "style",
-                "type"
-            ])
+                raw_code = find_value(row, [
+                    "code",
+                    "base code",
+                    "passcode"
+                ])
 
-            tag1 = find_value(row, [
-                "description tag1",
-                "tag1"
-            ])
+                name = find_value(row, [
+                    "name",
+                    "base name"
+                ])
 
-            tag2 = find_value(row, [
-                "description tag2",
-                "tag2"
-            ])
+                server = find_value(row, [
+                    "shard",
+                    "server"
+                ])
 
-            server = find_value(row, [
-                "shard",
-                "server"
-            ])
+                venue = ""
+
+                tag1 = ""
+
+                tag2 = ""
+
+                style = "Pending"
+
+            # =============================================
+            # VERIFIED / TEST FORMAT
+            # =============================================
+
+            else:
+
+                raw_code = find_value(row, [
+                    "base code",
+                    "passcode",
+                    "code"
+                ])
+
+                name = find_value(row, [
+                    "base name (sg / vg)",
+                    "base name",
+                    "sg name",
+                    "name"
+                ])
+
+                venue = find_value(row, [
+                    "venue",
+                    "style",
+                    "type"
+                ])
+
+                tag1 = find_value(row, [
+                    "description tag1",
+                    "tag1"
+                ])
+
+                tag2 = find_value(row, [
+                    "description tag2",
+                    "tag2"
+                ])
+
+                server = find_value(row, [
+                    "shard",
+                    "server"
+                ])
+
+                if sheet_category == "test":
+
+                    style = "TEST"
+
+                else:
+
+                    style = (
+                        venue
+                        if venue
+                        else "Check Yourself"
+                    )
+
+            # =============================================
+            # VALIDATION
+            # =============================================
 
             if not raw_code:
                 continue
@@ -285,25 +350,9 @@ def load_google_sheet(gid, sheet_category):
             if not codes:
                 continue
 
-            # =================================================
-            # CATEGORY OVERRIDE
-            # =================================================
-
-            if sheet_category == "test":
-
-                style = "TEST"
-
-            elif sheet_category == "pending":
-
-                style = "Pending"
-
-            else:
-
-                style = (
-                    venue
-                    if venue
-                    else "Check Yourself"
-                )
+            # =============================================
+            # INSERT
+            # =============================================
 
             for code in codes:
 
