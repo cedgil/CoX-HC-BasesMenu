@@ -2,6 +2,7 @@ import csv
 import requests
 import re
 import os
+import random
 from datetime import datetime, timezone
 
 # =========================================================
@@ -28,6 +29,8 @@ SHEETS = {
     "1746205606": "test",
     "1332493366": "pending"
 }
+
+ENABLE_REDDIT = False
 
 # =========================================================
 # STORAGE
@@ -60,6 +63,24 @@ STYLE_SCORES = {
     "Pending": 1
 }
 
+HUB_KEYWORDS = [
+    "hub",
+    "travel",
+    "teleport",
+    "teleporter",
+    "portal",
+    "transit",
+    "tp"
+]
+
+BAD_WORDS = [
+    "nazi",
+    "hitler",
+    "porn",
+    "rape",
+    "racist"
+]
+
 # =========================================================
 # HELPERS
 # =========================================================
@@ -68,26 +89,21 @@ def clean(v):
     return (v or "").strip()
 
 
-def normalize_header(v):
-    return clean(v).lower()
-
-
 def is_valid_code(code):
-
-    return bool(
-        re.match(
-            r"^[A-Z0-9]{2,}-\d+$",
-            code.upper()
-        )
-    )
+    return bool(re.match(r"^[A-Z0-9]{2,}-\d+$", code.upper()))
 
 
 def find_codes(text):
-
     return re.findall(
         r"\b[A-Z0-9]{2,}-\d+\b",
         (text or "").upper()
     )
+
+
+def contains_keyword(text, keywords):
+    t = (text or "").lower()
+    return any(k in t for k in keywords)
+
 
 # =========================================================
 # BASE STORAGE
@@ -106,12 +122,12 @@ def add_base(
 ):
 
     if not code:
-        return
+        return False
 
     code = clean(code).upper()
 
     if not is_valid_code(code):
-        return
+        return False
 
     if code not in BASES:
 
@@ -128,9 +144,7 @@ def add_base(
             "category": category,
 
             "venue": clean(venue),
-
             "tag1": clean(tag1),
-
             "tag2": clean(tag2),
 
             "sources": [],
@@ -139,8 +153,10 @@ def add_base(
         }
 
     if source not in BASES[code]["sources"]:
-
         BASES[code]["sources"].append(source)
+
+    return True
+
 
 # =========================================================
 # HEADER DETECTION
@@ -150,68 +166,50 @@ def find_header(rows):
 
     for idx, row in enumerate(rows):
 
-        normalized = [
-            normalize_header(c)
-            for c in row
-        ]
+        normalized = [clean(c) for c in row]
 
-        joined = " | ".join(normalized)
+        upper = [c.upper() for c in normalized]
 
         # VERIFIED / TEST
         if (
-            "base code" in joined
-            or "passcode" in joined
+            "BASE CODE" in upper
+            and (
+                "BASE NAME (SG / VG)" in upper
+                or "VENUE" in upper
+            )
         ):
             return idx
 
         # PENDING
         if (
-            "shard" in joined
-            and "code" in joined
-            and "name" in joined
+            "CODE" in upper
+            and "NAME" in upper
+            and "SHARD" in upper
         ):
             return idx
 
     return -1
 
-# =========================================================
-# COLUMN FINDERS
-# =========================================================
-
-def find_value(row, possible_keys):
-
-    normalized = {
-        normalize_header(k): v
-        for k, v in row.items()
-    }
-
-    for key in possible_keys:
-
-        if key in normalized:
-
-            return clean(normalized[key])
-
-    return ""
 
 # =========================================================
 # GOOGLE PARSER
 # =========================================================
 
-def load_google_sheet(gid, sheet_category):
+def load_google_sheet(gid, category):
+
+    print("================================")
+    print(f"LOADING SHEET {gid}")
+    print(f"CATEGORY: {category}")
+    print("================================")
 
     url = (
         f"{BASE_SHEET_URL}"
         f"/export?format=csv&gid={gid}"
     )
 
-    print("================================")
-    print(f"LOADING SHEET {gid}")
-    print(f"CATEGORY: {sheet_category}")
-    print("================================")
-
     try:
 
-        r = requests.get(url, timeout=60)
+        r = requests.get(url, timeout=30)
 
         r.raise_for_status()
 
@@ -223,190 +221,221 @@ def load_google_sheet(gid, sheet_category):
 
         if header_index < 0:
 
-            print(
-                f"SKIPPING EMPTY SHEET {gid}"
-            )
-
+            print(f"HEADER NOT FOUND FOR {gid}")
             return
 
         header = rows[header_index]
 
+        data_rows = rows[header_index + 1:]
+
         print("HEADER FOUND:")
         print(header)
 
-        data_rows = rows[header_index + 1:]
+        print("FIRST ROWS:")
+
+        for preview in data_rows[:3]:
+
+            try:
+                row_preview = dict(zip(header, preview))
+                print(row_preview)
+            except:
+                pass
+
+        print(f"TOTAL ROWS: {len(data_rows)}")
 
         csv_text = "\n".join([
             ",".join(r)
             for r in [header] + data_rows
         ])
 
-        reader = list(
-            csv.DictReader(csv_text.splitlines())
-        )
+        reader = csv.DictReader(csv_text.splitlines())
 
-        print("FIRST ROWS:")
-
-        for x in reader[:3]:
-            print(x)
-
-        print(f"TOTAL ROWS: {len(reader)}")
-
-        added = 0
+        added_count = 0
 
         for row in reader:
 
-            # =============================================
-            # PENDING FORMAT
-            # =============================================
+            upper_keys = {
+                (k or "").upper(): v
+                for k, v in row.items()
+            }
 
-            if sheet_category == "pending":
+            # =================================================
+            # VERIFIED / TEST
+            # =================================================
 
-                raw_code = find_value(row, [
-                    "code",
-                    "base code",
-                    "passcode"
-                ])
+            if category in ["verified", "test"]:
 
-                name = find_value(row, [
-                    "name",
-                    "base name"
-                ])
+                raw_code = clean(
+                    upper_keys.get("BASE CODE")
+                )
 
-                server = find_value(row, [
-                    "shard",
-                    "server"
-                ])
+                name = clean(
+                    upper_keys.get("BASE NAME (SG / VG)")
+                )
 
-                venue = ""
+                venue = clean(
+                    upper_keys.get("VENUE")
+                )
 
-                tag1 = ""
+                tag1 = clean(
+                    upper_keys.get("DESCRIPTION TAG1")
+                )
 
-                tag2 = ""
+                tag2 = clean(
+                    upper_keys.get("DESCRIPTION TAG2")
+                )
 
-                style = "Pending"
+                server = clean(
+                    upper_keys.get("SHARD")
+                    or upper_keys.get("SERVER")
+                )
 
-            # =============================================
-            # VERIFIED / TEST FORMAT
-            # =============================================
+                if not raw_code:
+                    continue
 
-            else:
+                codes = find_codes(raw_code)
 
-                raw_code = find_value(row, [
-                    "base code",
-                    "passcode",
-                    "code"
-                ])
+                if not codes:
+                    continue
 
-                name = find_value(row, [
-                    "base name (sg / vg)",
-                    "base name",
-                    "sg name",
-                    "name"
-                ])
+                style = venue if venue else "Check Yourself"
 
-                venue = find_value(row, [
-                    "venue",
-                    "style",
-                    "type"
-                ])
-
-                tag1 = find_value(row, [
-                    "description tag1",
-                    "tag1"
-                ])
-
-                tag2 = find_value(row, [
-                    "description tag2",
-                    "tag2"
-                ])
-
-                server = find_value(row, [
-                    "shard",
-                    "server"
-                ])
-
-                if sheet_category == "test":
-
+                if category == "test":
                     style = "TEST"
 
-                else:
+                for code in codes:
 
-                    style = (
-                        venue
-                        if venue
-                        else "Check Yourself"
+                    added = add_base(
+                        server=server,
+                        name=name,
+                        code=code,
+                        style=style,
+                        category=category,
+                        source="google",
+                        venue=venue,
+                        tag1=tag1,
+                        tag2=tag2
                     )
 
-            # =============================================
-            # VALIDATION
-            # =============================================
+                    if added:
+                        added_count += 1
 
-            if not raw_code:
-                continue
+            # =================================================
+            # PENDING
+            # =================================================
 
-            codes = find_codes(raw_code)
+            elif category == "pending":
 
-            if not codes:
-                continue
-
-            # =============================================
-            # INSERT
-            # =============================================
-
-            for code in codes:
-
-                print(
-                    f"ADDING {code} | "
-                    f"{sheet_category}"
+                raw_code = clean(
+                    upper_keys.get("CODE")
                 )
 
-                add_base(
-
-                    server=server,
-
-                    name=name,
-
-                    code=code,
-
-                    style=style,
-
-                    category=sheet_category,
-
-                    source="google",
-
-                    venue=venue,
-
-                    tag1=tag1,
-
-                    tag2=tag2
+                name = clean(
+                    upper_keys.get("NAME")
                 )
 
-                added += 1
+                server = clean(
+                    upper_keys.get("SHARD")
+                )
 
-        print(
-            f"ADDED {added} BASES "
-            f"FROM {gid}"
-        )
+                if not raw_code:
+                    continue
+
+                codes = find_codes(raw_code)
+
+                if not codes:
+                    continue
+
+                for code in codes:
+
+                    added = add_base(
+                        server=server,
+                        name=name,
+                        code=code,
+                        style="Pending",
+                        category="pending",
+                        source="google"
+                    )
+
+                    if added:
+                        added_count += 1
+
+        print(f"ADDED {added_count} BASES FROM {gid}")
 
     except Exception as e:
 
-        print(f"GOOGLE SHEET ERROR {gid}:")
-        print(e)
+        print(f"GOOGLE SHEET ERROR {gid}: {e}")
 
-# =========================================================
-# LOAD GOOGLE
-# =========================================================
 
 def load_google():
 
-    print(
-        f"{len(SHEETS)} SHEETS CONFIGURED"
-    )
+    print("================================")
+    print("SCRAPER START")
+    print("================================")
+
+    print(f"{len(SHEETS)} SHEETS CONFIGURED")
 
     for gid, category in SHEETS.items():
 
         load_google_sheet(gid, category)
+
+
+# =========================================================
+# REDDIT
+# =========================================================
+
+def load_reddit():
+
+    if not ENABLE_REDDIT:
+
+        print("REDDIT DISABLED")
+        return
+
+    url = (
+        "https://www.reddit.com/"
+        "r/Cityofheroes/.json?limit=100"
+    )
+
+    headers = {
+        "User-Agent": random.choice([
+            "Mozilla/5.0",
+            "Chrome/125",
+            "Firefox/126"
+        ])
+    }
+
+    try:
+
+        r = requests.get(
+            url,
+            headers=headers,
+            timeout=30
+        )
+
+        if r.status_code == 403:
+
+            print("REDDIT BLOCKED")
+            return
+
+        matches = find_codes(r.text)
+
+        for code in matches:
+
+            add_base(
+                server="Unknown",
+                name="Reddit Found",
+                code=code,
+                style="Check Yourself",
+                category="verified",
+                source="reddit"
+            )
+
+        print(f"REDDIT: {len(matches)} CODES")
+
+    except Exception as e:
+
+        print(f"REDDIT ERROR: {e}")
+
 
 # =========================================================
 # SCORING
@@ -418,6 +447,8 @@ def compute_score(base):
 
     if base["server"] in VALID_SERVERS:
         score += 5
+    else:
+        score -= 5
 
     if base["name"]:
         score += 5
@@ -431,16 +462,33 @@ def compute_score(base):
     if "google" in base["sources"]:
         score += 20
 
+    if "reddit" in base["sources"]:
+        score += 6
+
+    search_text = " ".join([
+        base["name"],
+        base["venue"],
+        base["tag1"],
+        base["tag2"]
+    ]).lower()
+
+    if contains_keyword(search_text, HUB_KEYWORDS):
+        score += 7
+
     score += STYLE_SCORES.get(
         base["style"],
         0
     )
 
+    text = (
+        f'{base["name"]} {base["code"]}'
+    ).lower()
+
+    if any(w in text for w in BAD_WORDS):
+        score -= 20
+
     return max(score, 0)
 
-# =========================================================
-# NORMALIZE SCORES
-# =========================================================
 
 def normalize_scores():
 
@@ -470,6 +518,7 @@ def normalize_scores():
 
         base["score"] = normalized
 
+
 # =========================================================
 # SUPABASE
 # =========================================================
@@ -477,21 +526,12 @@ def normalize_scores():
 def supabase_headers():
 
     return {
-
         "apikey": SUPABASE_KEY,
-
-        "Authorization":
-            f"Bearer {SUPABASE_KEY}",
-
+        "Authorization": f"Bearer {SUPABASE_KEY}",
         "Content-Type": "application/json",
-
-        "Prefer":
-            "resolution=merge-duplicates"
+        "Prefer": "resolution=merge-duplicates"
     }
 
-# =========================================================
-# CHUNKER
-# =========================================================
 
 def chunk_list(items, size):
 
@@ -499,9 +539,6 @@ def chunk_list(items, size):
 
         yield items[i:i + size]
 
-# =========================================================
-# PUSH
-# =========================================================
 
 def push_bases():
 
@@ -519,17 +556,12 @@ def push_bases():
             "code": base["code"],
 
             "server": base["server"],
-
             "name": base["name"],
-
             "style": base["style"],
-
             "category": base["category"],
 
             "venue": base["venue"],
-
             "tag1": base["tag1"],
-
             "tag2": base["tag2"],
 
             "sources": base["sources"],
@@ -537,34 +569,31 @@ def push_bases():
             "score": base["score"],
 
             "updated_at": NOW.isoformat(),
-
             "last_seen_at": NOW.isoformat(),
 
             "missing_since": None,
-
             "is_missing": False
         })
 
+    print(f"TOTAL BASES: {len(payload)}")
     print(f"PUSHING {len(payload)} BASES")
 
+    batch_size = 100
+
     for idx, batch in enumerate(
-        chunk_list(payload, 100),
+        chunk_list(payload, batch_size),
         start=1
     ):
 
         print(
-            f"BATCH {idx} "
-            f"({len(batch)} rows)"
+            f"PUSHING BATCH {idx} "
+            f"({len(batch)} ROWS)"
         )
 
         r = requests.post(
-
             url,
-
             headers=supabase_headers(),
-
             json=batch,
-
             timeout=60
         )
 
@@ -573,29 +602,25 @@ def push_bases():
         if r.text:
             print(r.text[:300])
 
+
 # =========================================================
 # MAIN
 # =========================================================
 
 def main():
 
-    print("================================")
-    print("SCRAPER START")
-    print("================================")
-
     load_google()
 
-    normalize_scores()
+    load_reddit()
 
-    print(
-        f"TOTAL BASES: {len(BASES)}"
-    )
+    normalize_scores()
 
     push_bases()
 
     print("================================")
-    print("DONE")
+    print("SCRAPER DONE")
     print("================================")
+
 
 if __name__ == "__main__":
 
