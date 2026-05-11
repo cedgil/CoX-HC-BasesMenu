@@ -93,7 +93,7 @@ def main():
         by_code[row["code"]].append(row)
 
     cross_server = []
-    same_code = []
+    total_same_code = 0
 
     for code in sorted(by_code.keys()):
         rows = by_code[code]
@@ -103,7 +103,11 @@ def main():
             cross_server.append((code, servers, len(rows)))
 
         if len(rows) >= 2:
-            same_code.append((code, servers, len(rows)))
+            total_same_code += 1
+
+    test_codes = {row["code"] for row in all_rows if row["sheet"] == "TEST"}
+    other_codes = {row["code"] for row in all_rows if row["sheet"] != "TEST"}
+    unique_test_codes = test_codes - other_codes
 
     print()
     print("=== TEST 1 : mêmes passcodes sur des serveurs différents ===")
@@ -113,9 +117,11 @@ def main():
 
     print()
     print("=== TEST 2 : mêmes passcodes, peu importe le serveur ===")
-    print(f"Total: {len(same_code)}")
-    for code, servers, count_rows in same_code:
-        print(f"{code} => rows={count_rows} | servers={', '.join(servers)}")
+    print(f"Total: {total_same_code}")
+
+    print()
+    print("=== TEST 3 : bases dans TEST avec un passcode introuvable ailleurs ===")
+    print(f"Total: {len(unique_test_codes)}")
 
 
 if __name__ == "__main__":
