@@ -1,4 +1,4 @@
-name: TEST CoX Base Scraper
+name: TEST WHATEVER
 
 on:
   workflow_dispatch:
