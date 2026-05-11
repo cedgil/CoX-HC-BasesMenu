@@ -37,10 +37,10 @@ ENABLE_REDDIT = False
 # =========================================================
 
 BASES = {}
-DUPLICATE_CODES = set()
 TEST_CODES = set()
 NON_TEST_CODES = set()
 TOTAL_GOOGLE_BASES = 0
+IGNORED_DUPLICATE_PASSCODES = 0
 
 # =========================================================
 # CONSTANTS
@@ -124,6 +124,8 @@ def add_base(
     tag1="",
     tag2=""
 ):
+    global IGNORED_DUPLICATE_PASSCODES
+
     if not code:
         return False
 
@@ -137,12 +139,12 @@ def add_base(
     else:
         NON_TEST_CODES.add(code)
 
-    already_exists = code in BASES
+    if code in BASES:
+        IGNORED_DUPLICATE_PASSCODES += 1
 
-    if already_exists:
-        DUPLICATE_CODES.add(code)
         if source not in BASES[code]["sources"]:
             BASES[code]["sources"].append(source)
+
         return False
 
     BASES[code] = {
@@ -250,6 +252,7 @@ def load_google_sheet(gid, category):
         reader = csv.DictReader(csv_text.splitlines())
 
         added_count = 0
+        ignored_count = 0
 
         for row in reader:
             raw_code = clean(
@@ -322,13 +325,15 @@ def load_google_sheet(gid, category):
 
                 if added:
                     added_count += 1
+                else:
+                    ignored_count += 1
 
         TOTAL_GOOGLE_BASES += added_count
 
         if category == "test":
-            unique_passcodes = len(TEST_CODES - NON_TEST_CODES)
-            duplicated_passcodes = total_rows - unique_passcodes
-            print(f"VALID  UNIQUE PASSCODES : {unique_passcodes}")
+            unique_passcodes = added_count
+            duplicated_passcodes = ignored_count
+            print(f"VALID UNIQUE PASSCODES : {unique_passcodes}")
             print(f"IGNORED DUPLICATED PASSCODES : {duplicated_passcodes}")
             print()
 
@@ -350,7 +355,7 @@ def load_google():
 
     print("================================")
     print(f"TOTAL GOOGLE BASES : {TOTAL_GOOGLE_BASES}")
-    print(f"IGNORED DUPLICATE PASSCODES : {len(DUPLICATE_CODES)}")
+    print(f"IGNORED DUPLICATE PASSCODES : {IGNORED_DUPLICATE_PASSCODES}")
     print("================================")
 
 
