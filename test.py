@@ -4,7 +4,6 @@ import re
 import os
 import random
 from datetime import datetime, timezone
-from collections import defaultdict
 
 # =========================================================
 # CONFIG
@@ -41,6 +40,7 @@ BASES = {}
 DUPLICATE_CODES = set()
 TEST_CODES = set()
 NON_TEST_CODES = set()
+TOTAL_GOOGLE_BASES = 0
 
 # =========================================================
 # CONSTANTS
@@ -199,6 +199,8 @@ def find_header(rows):
 # =========================================================
 
 def load_google_sheet(gid, category):
+    global TOTAL_GOOGLE_BASES
+
     print("================================")
     print(f"LOADING SHEET {gid}")
     print(f"CATEGORY: {category}")
@@ -320,14 +322,13 @@ def load_google_sheet(gid, category):
                 if added:
                     added_count += 1
 
+        TOTAL_GOOGLE_BASES += added_count
+
         print(f"ADDED {added_count} BASES FROM {gid}")
 
         if category == "test":
             test_unique_passcodes = len(TEST_CODES - NON_TEST_CODES)
             print(f"TEST UNIQUE PASSCODES : {test_unique_passcodes}")
-
-        if category == "pending":
-            print(f"IGNORED DUPLICATE PASSCODES : {len(DUPLICATE_CODES)}")
 
     except Exception as e:
         print(f"GOOGLE SHEET ERROR {gid}: {e}")
@@ -342,6 +343,11 @@ def load_google():
 
     for gid, category in SHEETS.items():
         load_google_sheet(gid, category)
+
+    print("================================")
+    print(f"TOTAL GOOGLE BASES : {TOTAL_GOOGLE_BASES}")
+    print(f"IGNORED DUPLICATE PASSCODES : {len(DUPLICATE_CODES)}")
+    print("================================")
 
 
 # =========================================================
@@ -515,8 +521,11 @@ def push_bases():
             "is_missing": False
         })
 
+    print("================================")
     print(f"TOTAL BASES: {len(payload)}")
+    print()
     print(f"PUSHING {len(payload)} BASES")
+    print("================================")
 
     batch_size = 100
 
@@ -549,6 +558,7 @@ def push_bases():
 def main():
     load_google()
     load_reddit()
+    print("================================")
     normalize_scores()
     push_bases()
 
