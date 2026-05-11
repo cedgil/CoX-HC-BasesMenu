@@ -239,7 +239,8 @@ def load_google_sheet(gid, category):
             except:
                 pass
 
-        print(f"TOTAL ROWS: {len(data_rows)}")
+        total_rows = len(data_rows)
+        print(f"TOTAL ROWS: {total_rows}")
 
         csv_text = "\n".join([
             ",".join(r)
@@ -324,11 +325,14 @@ def load_google_sheet(gid, category):
 
         TOTAL_GOOGLE_BASES += added_count
 
-        print(f"ADDED {added_count} BASES FROM {gid}")
-
         if category == "test":
-            test_unique_passcodes = len(TEST_CODES - NON_TEST_CODES)
-            print(f"TEST UNIQUE PASSCODES : {test_unique_passcodes}")
+            unique_passcodes = len(TEST_CODES - NON_TEST_CODES)
+            duplicated_passcodes = total_rows - unique_passcodes
+            print(f"VALID  UNIQUE PASSCODES : {unique_passcodes}")
+            print(f"IGNORED DUPLICATED PASSCODES : {duplicated_passcodes}")
+            print()
+
+        print(f"ADDED {added_count} BASES FROM {gid}")
 
     except Exception as e:
         print(f"GOOGLE SHEET ERROR {gid}: {e}")
@@ -346,7 +350,7 @@ def load_google():
 
     print("================================")
     print(f"TOTAL GOOGLE BASES : {TOTAL_GOOGLE_BASES}")
-    print(f"AND IGNORED DUPLICATE PASSCODES : {len(DUPLICATE_CODES)}")
+    print(f"IGNORED DUPLICATE PASSCODES : {len(DUPLICATE_CODES)}")
     print("================================")
 
 
