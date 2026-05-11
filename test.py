@@ -346,7 +346,7 @@ def load_google():
 
     print("================================")
     print(f"TOTAL GOOGLE BASES : {TOTAL_GOOGLE_BASES}")
-    print(f"IGNORED DUPLICATE PASSCODES : {len(DUPLICATE_CODES)}")
+    print(f"AND IGNORED DUPLICATE PASSCODES : {len(DUPLICATE_CODES)}")
     print("================================")
 
 
