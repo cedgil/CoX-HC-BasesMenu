@@ -5,24 +5,12 @@ import os
 import random
 from datetime import datetime, timezone
 
-# =========================================================
-# CONFIG
-# =========================================================
-
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_KEY"]
-
 NOW = datetime.now(timezone.utc)
 
 SPREADSHEET_ID = "14DqavAx6ov60d92rhvwy2sNEW_909MCHp421GM4q-Yk"
-
-BASE_SHEET_URL = (
-    f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}"
-)
-
-# =========================================================
-# SHEETS
-# =========================================================
+BASE_SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}"
 
 SHEETS = {
     "2014365553": "verified",
@@ -32,19 +20,9 @@ SHEETS = {
 
 ENABLE_REDDIT = False
 
-# =========================================================
-# STORAGE
-# =========================================================
-
 BASES = {}
-TEST_CODES = set()
-NON_TEST_CODES = set()
 TOTAL_GOOGLE_BASES = 0
-IGNORED_DUPLICATE_PASSCODES = 0
-
-# =========================================================
-# CONSTANTS
-# =========================================================
+TOTAL_IGNORED_GOOGLE_ROWS = 0
 
 VALID_SERVERS = [
     "Everlasting",
@@ -85,9 +63,6 @@ BAD_WORDS = [
     "racist"
 ]
 
-# =========================================================
-# HELPERS
-# =========================================================
 
 def clean(v):
     return (v or "").strip()
@@ -98,10 +73,7 @@ def is_valid_code(code):
 
 
 def find_codes(text):
-    return re.findall(
-        r"\b[A-Z0-9]{2,}-\d+\b",
-        (text or "").upper()
-    )
+    return re.findall(r"\b[A-Z0-9]{2,}-\d+\b", (text or "").upper())
 
 
 def contains_keyword(text, keywords):
@@ -109,23 +81,7 @@ def contains_keyword(text, keywords):
     return any(k in t for k in keywords)
 
 
-# =========================================================
-# BASE STORAGE
-# =========================================================
-
-def add_base(
-    server,
-    name,
-    code,
-    style,
-    category,
-    source,
-    venue="",
-    tag1="",
-    tag2=""
-):
-    global IGNORED_DUPLICATE_PASSCODES
-
+def add_base(server, name, code, style, category, source, venue="", tag1="", tag2=""):
     if not code:
         return False
 
@@ -134,17 +90,9 @@ def add_base(
     if not is_valid_code(code):
         return False
 
-    if category == "test":
-        TEST_CODES.add(code)
-    else:
-        NON_TEST_CODES.add(code)
-
     if code in BASES:
-        IGNORED_DUPLICATE_PASSCODES += 1
-
         if source not in BASES[code]["sources"]:
             BASES[code]["sources"].append(source)
-
         return False
 
     BASES[code] = {
@@ -159,20 +107,12 @@ def add_base(
         "sources": [source],
         "score": 0
     }
-
     return True
 
 
-# =========================================================
-# HEADER DETECTION
-# =========================================================
-
 def find_header(rows):
     for idx, row in enumerate(rows):
-        normalized = [
-            clean(c).strip().upper()
-            for c in row
-        ]
+        normalized = [clean(c).strip().upper() for c in row]
 
         has_code = (
             "BASE CODE" in normalized
@@ -196,22 +136,15 @@ def find_header(rows):
     return -1
 
 
-# =========================================================
-# GOOGLE PARSER
-# =========================================================
-
 def load_google_sheet(gid, category):
-    global TOTAL_GOOGLE_BASES
+    global TOTAL_GOOGLE_BASES, TOTAL_IGNORED_GOOGLE_ROWS
 
     print("================================")
     print(f"LOADING SHEET {gid}")
     print(f"CATEGORY: {category}")
     print("================================")
 
-    url = (
-        f"{BASE_SHEET_URL}"
-        f"/export?format=csv&gid={gid}"
-    )
+    url = f"{BASE_SHEET_URL}/export?format=csv&gid={gid}"
 
     try:
         r = requests.get(url, timeout=30)
@@ -233,26 +166,23 @@ def load_google_sheet(gid, category):
         print(header)
 
         print("FIRST ROWS:")
-
         for preview in data_rows[:3]:
             try:
-                row_preview = dict(zip(header, preview))
-                print(row_preview)
+                print(dict(zip(header, preview)))
             except:
                 pass
 
         total_rows = len(data_rows)
         print(f"TOTAL ROWS: {total_rows}")
 
-        csv_text = "\n".join([
-            ",".join(r)
-            for r in [header] + data_rows
-        ])
-
+        csv_text = "\n".join([",".join(r) for r in [header] + data_rows])
         reader = csv.DictReader(csv_text.splitlines())
 
         added_count = 0
         ignored_count = 0
+
+        pre_existing_codes = set(BASES.keys())
+        sheet_added_codes = set()
 
         for row in reader:
             raw_code = clean(
@@ -311,6 +241,9 @@ def load_google_sheet(gid, category):
                 style = venue if venue else "Check Yourself"
 
             for code in codes:
+                if code in BASES:
+                    ignored_count += 1
+
                 added = add_base(
                     server=server,
                     name=name,
@@ -325,16 +258,16 @@ def load_google_sheet(gid, category):
 
                 if added:
                     added_count += 1
-                else:
-                    ignored_count += 1
+                    sheet_added_codes.add(code)
 
         TOTAL_GOOGLE_BASES += added_count
+        TOTAL_IGNORED_GOOGLE_ROWS += ignored_count
 
         if category == "test":
-            unique_passcodes = added_count
-            duplicated_passcodes = ignored_count
-            print(f"VALID UNIQUE PASSCODES : {unique_passcodes}")
-            print(f"IGNORED DUPLICATED PASSCODES : {duplicated_passcodes}")
+            valid_unique_passcodes = len(sheet_added_codes - pre_existing_codes)
+            ignored_duplicated_passcodes = ignored_count
+            print(f"VALID UNIQUE PASSCODES : {valid_unique_passcodes}")
+            print(f"IGNORED DUPLICATED PASSCODES : {ignored_duplicated_passcodes}")
             print()
 
         print(f"ADDED {added_count} BASES FROM {gid}")
@@ -347,7 +280,6 @@ def load_google():
     print("================================")
     print("SCRAPER START")
     print("================================")
-
     print(f"{len(SHEETS)} SHEETS CONFIGURED")
 
     for gid, category in SHEETS.items():
@@ -355,24 +287,16 @@ def load_google():
 
     print("================================")
     print(f"TOTAL GOOGLE BASES : {TOTAL_GOOGLE_BASES}")
-    print(f"IGNORED DUPLICATE PASSCODES : {IGNORED_DUPLICATE_PASSCODES}")
+    print(f"IGNORED DUPLICATE PASSCODES : {TOTAL_IGNORED_GOOGLE_ROWS}")
     print("================================")
 
-
-# =========================================================
-# REDDIT
-# =========================================================
 
 def load_reddit():
     if not ENABLE_REDDIT:
         print("REDDIT DISABLED")
         return
 
-    url = (
-        "https://www.reddit.com/"
-        "r/Cityofheroes/.json?limit=100"
-    )
-
+    url = "https://www.reddit.com/r/Cityofheroes/.json?limit=100"
     headers = {
         "User-Agent": random.choice([
             "Mozilla/5.0",
@@ -382,11 +306,7 @@ def load_reddit():
     }
 
     try:
-        r = requests.get(
-            url,
-            headers=headers,
-            timeout=30
-        )
+        r = requests.get(url, headers=headers, timeout=30)
 
         if r.status_code == 403:
             print("REDDIT BLOCKED")
@@ -409,10 +329,6 @@ def load_reddit():
     except Exception as e:
         print(f"REDDIT ERROR: {e}")
 
-
-# =========================================================
-# SCORING
-# =========================================================
 
 def compute_score(base):
     score = 0
@@ -447,14 +363,9 @@ def compute_score(base):
     if contains_keyword(search_text, HUB_KEYWORDS):
         score += 7
 
-    score += STYLE_SCORES.get(
-        base["style"],
-        0
-    )
+    score += STYLE_SCORES.get(base["style"], 0)
 
-    text = (
-        f'{base["name"]} {base["code"]}'
-    ).lower()
+    text = f'{base["name"]} {base["code"]}'.lower()
 
     if any(w in text for w in BAD_WORDS):
         score -= 20
@@ -479,16 +390,8 @@ def normalize_scores():
         max_score = 1
 
     for base in BASES.values():
-        normalized = round(
-            (base["_raw_score"] / max_score) * 100
-        )
+        base["score"] = round((base["_raw_score"] / max_score) * 100)
 
-        base["score"] = normalized
-
-
-# =========================================================
-# SUPABASE
-# =========================================================
 
 def supabase_headers():
     return {
@@ -505,11 +408,7 @@ def chunk_list(items, size):
 
 
 def push_bases():
-    url = (
-        f"{SUPABASE_URL}"
-        f"?on_conflict=code"
-    )
-
+    url = f"{SUPABASE_URL}?on_conflict=code"
     payload = []
 
     for base in BASES.values():
@@ -536,33 +435,13 @@ def push_bases():
     print(f"PUSHING {len(payload)} BASES")
     print("================================")
 
-    batch_size = 100
-
-    for idx, batch in enumerate(
-        chunk_list(payload, batch_size),
-        start=1
-    ):
-        print(
-            f"PUSHING BATCH {idx} "
-            f"({len(batch)} ROWS)"
-        )
-
-        r = requests.post(
-            url,
-            headers=supabase_headers(),
-            json=batch,
-            timeout=60
-        )
-
+    for idx, batch in enumerate(chunk_list(payload, 100), start=1):
+        print(f"PUSHING BATCH {idx} ({len(batch)} ROWS)")
+        r = requests.post(url, headers=supabase_headers(), json=batch, timeout=60)
         print(r.status_code)
-
         if r.text:
             print(r.text[:300])
 
-
-# =========================================================
-# MAIN
-# =========================================================
 
 def main():
     load_google()
@@ -570,7 +449,6 @@ def main():
     print("================================")
     normalize_scores()
     push_bases()
-
     print("================================")
     print("SCRAPER DONE")
     print("================================")
