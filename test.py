@@ -92,15 +92,30 @@ def main():
     for row in all_rows:
         by_code[row["code"]].append(row)
 
-    found = False
-    for code in sorted(by_code.keys()):
-        servers = sorted({r["server"] for r in by_code[code] if r["server"]})
-        if len(servers) >= 2:
-            found = True
-            print(f"{code} => {', '.join(servers)}")
+    cross_server = []
+    same_code = []
 
-    if not found:
-        print("Aucun passcode dupliqué sur des serveurs différents.")
+    for code in sorted(by_code.keys()):
+        rows = by_code[code]
+        servers = sorted({r["server"] for r in rows if r["server"]})
+
+        if len(servers) >= 2:
+            cross_server.append((code, servers, len(rows)))
+
+        if len(rows) >= 2:
+            same_code.append((code, servers, len(rows)))
+
+    print()
+    print("=== TEST 1 : mêmes passcodes sur des serveurs différents ===")
+    print(f"Total: {len(cross_server)}")
+    for code, servers, count_rows in cross_server:
+        print(f"{code} => {', '.join(servers)} (rows={count_rows})")
+
+    print()
+    print("=== TEST 2 : mêmes passcodes, peu importe le serveur ===")
+    print(f"Total: {len(same_code)}")
+    for code, servers, count_rows in same_code:
+        print(f"{code} => rows={count_rows} | servers={', '.join(servers)}")
 
 
 if __name__ == "__main__":
