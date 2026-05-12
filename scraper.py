@@ -15,10 +15,7 @@ SUPABASE_KEY = os.environ["SUPABASE_KEY"]
 NOW = datetime.now(timezone.utc)
 
 SPREADSHEET_ID = "14DqavAx6ov60d92rhvwy2sNEW_909MCHp421GM4q-Yk"
-
-BASE_SHEET_URL = (
-    f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}"
-)
+BASE_SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}"
 
 # =========================================================
 # SHEETS
@@ -37,6 +34,9 @@ ENABLE_REDDIT = False
 # =========================================================
 
 BASES = {}
+TOTAL_GOOGLE_BASES = 0
+TOTAL_GOOGLE_ROWS = 0
+TOTAL_IGNORED_GOOGLE_ROWS = 0
 
 # =========================================================
 # CONSTANTS
@@ -104,7 +104,6 @@ def contains_keyword(text, keywords):
     t = (text or "").lower()
     return any(k in t for k in keywords)
 
-
 # =========================================================
 # BASE STORAGE
 # =========================================================
@@ -120,7 +119,6 @@ def add_base(
     tag1="",
     tag2=""
 ):
-
     if not code:
         return False
 
@@ -129,51 +127,33 @@ def add_base(
     if not is_valid_code(code):
         return False
 
-    if code not in BASES:
+    if code in BASES:
+        if source not in BASES[code]["sources"]:
+            BASES[code]["sources"].append(source)
+        return False
 
-        BASES[code] = {
-
-            "code": code,
-
-            "server": clean(server) or "Unknown",
-
-            "name": clean(name) or "Unknown",
-
-            "style": clean(style) or "Check Yourself",
-
-            "category": category,
-
-            "venue": clean(venue),
-            "tag1": clean(tag1),
-            "tag2": clean(tag2),
-
-            "sources": [],
-
-            "score": 0
-        }
-
-    if source not in BASES[code]["sources"]:
-        BASES[code]["sources"].append(source)
+    BASES[code] = {
+        "code": code,
+        "server": clean(server) or "Unknown",
+        "name": clean(name) or "Unknown",
+        "style": clean(style) or "Check Yourself",
+        "category": category,
+        "venue": clean(venue),
+        "tag1": clean(tag1),
+        "tag2": clean(tag2),
+        "sources": [source],
+        "score": 0
+    }
 
     return True
-
 
 # =========================================================
 # HEADER DETECTION
 # =========================================================
 
 def find_header(rows):
-
     for idx, row in enumerate(rows):
-
-        normalized = [
-            clean(c).strip().upper()
-            for c in row
-        ]
-
-        # =================================================
-        # FLEXIBLE FORMAT DETECTION
-        # =================================================
+        normalized = [clean(c).strip().upper() for c in row]
 
         has_code = (
             "BASE CODE" in normalized
@@ -192,63 +172,52 @@ def find_header(rows):
         )
 
         if has_code and has_name and has_server:
-
             return idx
 
     return -1
-
 
 # =========================================================
 # GOOGLE PARSER
 # =========================================================
 
 def load_google_sheet(gid, category):
+    global TOTAL_GOOGLE_BASES, TOTAL_GOOGLE_ROWS, TOTAL_IGNORED_GOOGLE_ROWS
 
     print("================================")
     print(f"LOADING SHEET {gid}")
     print(f"CATEGORY: {category}")
     print("================================")
 
-    url = (
-        f"{BASE_SHEET_URL}"
-        f"/export?format=csv&gid={gid}"
-    )
+    url = f"{BASE_SHEET_URL}/export?format=csv&gid={gid}"
 
     try:
-
         r = requests.get(url, timeout=30)
-
         r.raise_for_status()
 
         lines = r.text.splitlines()
-
         rows = list(csv.reader(lines))
 
         header_index = find_header(rows)
 
         if header_index < 0:
-
             print(f"HEADER NOT FOUND FOR {gid}")
             return
 
         header = rows[header_index]
-
         data_rows = rows[header_index + 1:]
 
         print("HEADER FOUND:")
         print(header)
 
         print("FIRST ROWS:")
-
         for preview in data_rows[:3]:
-
             try:
-                row_preview = dict(zip(header, preview))
-                print(row_preview)
+                print(dict(zip(header, preview)))
             except:
                 pass
 
-        print(f"TOTAL ROWS: {len(data_rows)}")
+        total_rows = len(data_rows)
+        print(f"TOTAL ROWS: {total_rows}")
 
         csv_text = "\n".join([
             ",".join(r)
@@ -260,11 +229,6 @@ def load_google_sheet(gid, category):
         added_count = 0
 
         for row in reader:
-
-            # =================================================
-            # FLEXIBLE COLUMN ACCESS
-            # =================================================
-
             raw_code = clean(
                 row.get("Base Code")
                 or row.get("BASE CODE")
@@ -313,24 +277,14 @@ def load_google_sheet(gid, category):
             if not codes:
                 continue
 
-            # =================================================
-            # CATEGORY STYLE OVERRIDE
-            # =================================================
-
             if category == "test":
-
                 style = "TEST"
-
             elif category == "pending":
-
                 style = "Pending"
-
             else:
-
                 style = venue if venue else "Check Yourself"
 
             for code in codes:
-
                 added = add_base(
                     server=server,
                     name=name,
@@ -346,41 +300,47 @@ def load_google_sheet(gid, category):
                 if added:
                     added_count += 1
 
+        ignored_count = max(total_rows - added_count, 0)
+
+        TOTAL_GOOGLE_ROWS += total_rows
+        TOTAL_GOOGLE_BASES += added_count
+        TOTAL_IGNORED_GOOGLE_ROWS += ignored_count
+
+        if category == "test":
+            print(f"VALID UNIQUE PASSCODES : {added_count}")
+            print(f"IGNORED DUPLICATED PASSCODES : {ignored_count}")
+            print()
+
         print(f"ADDED {added_count} BASES FROM {gid}")
 
     except Exception as e:
-
         print(f"GOOGLE SHEET ERROR {gid}: {e}")
 
 
 def load_google():
-
     print("================================")
     print("SCRAPER START")
     print("================================")
-
     print(f"{len(SHEETS)} SHEETS CONFIGURED")
 
     for gid, category in SHEETS.items():
-
         load_google_sheet(gid, category)
 
+    print("================================")
+    print(f"TOTAL GOOGLE BASES : {TOTAL_GOOGLE_BASES}")
+    print(f"IGNORED DUPLICATE PASSCODES : {TOTAL_IGNORED_GOOGLE_ROWS}")
+    print("================================")
 
 # =========================================================
 # REDDIT
 # =========================================================
 
 def load_reddit():
-
     if not ENABLE_REDDIT:
-
         print("REDDIT DISABLED")
         return
 
-    url = (
-        "https://www.reddit.com/"
-        "r/Cityofheroes/.json?limit=100"
-    )
+    url = "https://www.reddit.com/r/Cityofheroes/.json?limit=100"
 
     headers = {
         "User-Agent": random.choice([
@@ -391,7 +351,6 @@ def load_reddit():
     }
 
     try:
-
         r = requests.get(
             url,
             headers=headers,
@@ -399,14 +358,12 @@ def load_reddit():
         )
 
         if r.status_code == 403:
-
             print("REDDIT BLOCKED")
             return
 
         matches = find_codes(r.text)
 
         for code in matches:
-
             add_base(
                 server="Unknown",
                 name="Reddit Found",
@@ -419,16 +376,13 @@ def load_reddit():
         print(f"REDDIT: {len(matches)} CODES")
 
     except Exception as e:
-
         print(f"REDDIT ERROR: {e}")
-
 
 # =========================================================
 # SCORING
 # =========================================================
 
 def compute_score(base):
-
     score = 0
 
     if base["server"] in VALID_SERVERS:
@@ -461,14 +415,9 @@ def compute_score(base):
     if contains_keyword(search_text, HUB_KEYWORDS):
         score += 7
 
-    score += STYLE_SCORES.get(
-        base["style"],
-        0
-    )
+    score += STYLE_SCORES.get(base["style"], 0)
 
-    text = (
-        f'{base["name"]} {base["code"]}'
-    ).lower()
+    text = f'{base["name"]} {base["code"]}'.lower()
 
     if any(w in text for w in BAD_WORDS):
         score -= 20
@@ -477,18 +426,14 @@ def compute_score(base):
 
 
 def normalize_scores():
-
     if not BASES:
         return
 
     raw_scores = []
 
     for base in BASES.values():
-
         raw = compute_score(base)
-
         base["_raw_score"] = raw
-
         raw_scores.append(raw)
 
     max_score = max(raw_scores)
@@ -497,20 +442,13 @@ def normalize_scores():
         max_score = 1
 
     for base in BASES.values():
-
-        normalized = round(
-            (base["_raw_score"] / max_score) * 100
-        )
-
-        base["score"] = normalized
-
+        base["score"] = round((base["_raw_score"] / max_score) * 100)
 
 # =========================================================
 # SUPABASE
 # =========================================================
 
 def supabase_headers():
-
     return {
         "apikey": SUPABASE_KEY,
         "Authorization": f"Bearer {SUPABASE_KEY}",
@@ -520,94 +458,59 @@ def supabase_headers():
 
 
 def chunk_list(items, size):
-
     for i in range(0, len(items), size):
-
         yield items[i:i + size]
 
 
 def push_bases():
-
-    url = (
-        f"{SUPABASE_URL}"
-        f"?on_conflict=code"
-    )
-
+    url = f"{SUPABASE_URL}?on_conflict=code"
     payload = []
 
     for base in BASES.values():
-
         payload.append({
-
             "code": base["code"],
-
             "server": base["server"],
             "name": base["name"],
             "style": base["style"],
             "category": base["category"],
-
             "venue": base["venue"],
             "tag1": base["tag1"],
             "tag2": base["tag2"],
-
             "sources": base["sources"],
-
             "score": base["score"],
-
             "updated_at": NOW.isoformat(),
             "last_seen_at": NOW.isoformat(),
-
             "missing_since": None,
             "is_missing": False
         })
 
+    print("================================")
     print(f"TOTAL BASES: {len(payload)}")
+    print()
     print(f"PUSHING {len(payload)} BASES")
+    print("================================")
 
-    batch_size = 100
-
-    for idx, batch in enumerate(
-        chunk_list(payload, batch_size),
-        start=1
-    ):
-
-        print(
-            f"PUSHING BATCH {idx} "
-            f"({len(batch)} ROWS)"
-        )
-
-        r = requests.post(
-            url,
-            headers=supabase_headers(),
-            json=batch,
-            timeout=60
-        )
-
+    for idx, batch in enumerate(chunk_list(payload, 100), start=1):
+        print(f"PUSHING BATCH {idx} ({len(batch)} ROWS)")
+        r = requests.post(url, headers=supabase_headers(), json=batch, timeout=60)
         print(r.status_code)
-
         if r.text:
             print(r.text[:300])
-
 
 # =========================================================
 # MAIN
 # =========================================================
 
 def main():
-
     load_google()
-
     load_reddit()
-
+    print("================================")
     normalize_scores()
-
     push_bases()
-
     print("================================")
     print("SCRAPER DONE")
     print("================================")
 
 
 if __name__ == "__main__":
-
     main()
