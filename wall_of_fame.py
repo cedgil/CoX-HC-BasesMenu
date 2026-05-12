@@ -44,9 +44,9 @@ STAR_TITLE_RE = re.compile(r"⭐([^⭐]+)⭐")
 def split_by_year(text: str) -> Dict[int, str]:
     """
     Découpe le texte en blocs par année, à partir des lignes
-    ~~~~~ 2025 ~~~~~, ~~~~~ 2024 ~~~~~, etc. [page:6]
+    ~~~~~ 2025 ~~~~~, ~~~~~ 2024 ~~~~~, etc.
     """
-    years = {}
+    years: Dict[int, str] = {}
     matches = list(YEAR_RE.finditer(text))
     for i, m in enumerate(matches):
         year = int(m.group(1))
@@ -61,7 +61,7 @@ def split_contest_sections(year_block: str) -> List[Dict[str, str]]:
     Dans un bloc d'année, trouve chaque titre de concours entre ⭐...⭐
     et renvoie une liste {title, text}.
     """
-    sections = []
+    sections: List[Dict[str, str]] = []
     matches = list(STAR_TITLE_RE.finditer(year_block))
     for i, m in enumerate(matches):
         title = m.group(1).strip()
@@ -83,7 +83,7 @@ def canonicalize_pipes_and_codes(text: str) -> str:
     """
     Le HTML du forum donne souvent :
       Excelsior\n| DIVINE-29035 |\nElysian Temple\n| By ...
-      Everlasting |\nFAECAVE-31825\n| Fae Caverns |\nBy\n@Aalya [page:6]
+      Everlasting |\nFAECAVE-31825\n| Fae Caverns |\nBy\n@Aalya
 
     On aplatit ça en :
       Excelsior | DIVINE-29035 | Elysian Temple | By ...
@@ -99,15 +99,13 @@ def canonicalize_pipes_and_codes(text: str) -> str:
 
 
 def parse_entries_from_section(year: int, contest_title: str, section_text: str) -> List[Dict]:
-    entries = []
+    entries: List[Dict] = []
     text = normalize_whitespace(section_text)
     text = canonicalize_pipes_and_codes(text)
 
-    # on aide un peu le split en forçant des retours à la ligne avant certains motifs
+    # On aide un peu le split en forçant des retours à la ligne avant certains motifs
     for shard in SHARDS:
-        # 'Shard:CODE-123 |' => '\nShard:CODE-123 |'
         text = re.sub(rf"\s*{shard}\s*:", f"\n{shard}:", text)
-        # 'Shard | CODE |' => '\nShard | CODE |'
         text = re.sub(rf"\s*{shard}\s*\|", f"\n{shard} |", text)
 
     lines = [l.strip() for l in text.split("\n") if l.strip()]
@@ -228,6 +226,10 @@ def main():
     print(f"[{datetime.utcnow().isoformat()}] Starting Wall of Fame scrape...")
     entries = scrape_wall_of_fame()
     print(f"Parsed {len(entries)} entries.")
+
+    # Debug : afficher quelques entrées pour vérifier que le parsing marche bien
+    print("Sample entries:", entries[:5])
+
     upsert_to_supabase(entries)
     print("Done.")
 
