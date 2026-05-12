@@ -1,5 +1,5 @@
 
-name: Homecoming Wall of Fame Scrapper WHATEVER
+name: HC Wall of Fame
 
 on:
   workflow_dispatch:
