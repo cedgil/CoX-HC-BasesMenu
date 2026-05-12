@@ -1,5 +1,6 @@
 Sources pour les badges / icones
-https://homecoming.wiki/wiki/Category:Icon_Images
+X https://homecoming.wiki/wiki/Category:Icon_Images
+https://homecoming.wiki/wiki/Macro_image_(Slash_Command)
 
 Sources syntaxe popmenus
 https://homecoming.wiki/wiki/Popmenu_(Slash_Command)
