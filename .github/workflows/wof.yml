@@ -2,29 +2,30 @@
 name: HC Wall of Fame
 
 on:
-  workflow_dispatch:
-
+  workflow_dispatch:        # lancement manuel
   schedule:
-    - cron: "0 */6 * * *"
+    - cron: "0 */23 * * *"
 
 jobs:
   scraper:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.11"   # ou 3.10/3.12 selon ton goût [web:217]
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install requests beautifulsoup4
 
-      - name: Run scraper
+      - name: Run Wall of Fame scraper
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-        run: python wall_of_fame.py
+        run: |
+          python scripts/scrape_wall_of_fame.py
