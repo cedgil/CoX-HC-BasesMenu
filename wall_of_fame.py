@@ -10,16 +10,22 @@ from datetime import datetime
 
 WALL_OF_FAME_URL = "https://forums.homecomingservers.com/topic/44842-wall-of-fame/"
 
-SUPABASE_URL = os.environ["SUPABASE_URL"].rstrip("/")
+# SUPABASE_URL peut être soit https://xyz.supabase.co soit https://xyz.supabase.co/rest/v1
+_raw_url = os.environ["SUPABASE_URL"].rstrip("/")
 SUPABASE_KEY = os.environ["SUPABASE_KEY"]
 SUPABASE_TABLE = "base_contest_entries"
+
+if _raw_url.endswith("/rest/v1"):
+    REST_BASE_URL = _raw_url
+else:
+    REST_BASE_URL = _raw_url + "/rest/v1"
 
 SHARDS = ["Everlasting", "Excelsior", "Torchbearer", "Indomitable", "Reunion", "Victory"]
 
 
 def fetch_wall_of_fame_html() -> str:
     headers = {
-        "User-Agent": "SugagabeWallOfFameScraper/1.1 (https://github.com/...)"
+        "User-Agent": "SugagabeWallOfFameScraper/1.2 (https://github.com/...)"
     }
     resp = requests.get(WALL_OF_FAME_URL, headers=headers, timeout=30)
     resp.raise_for_status()
@@ -42,10 +48,6 @@ STAR_TITLE_RE = re.compile(r"⭐([^⭐]+)⭐")
 
 
 def split_by_year(text: str) -> Dict[int, str]:
-    """
-    Découpe le texte en blocs par année, à partir des lignes
-    ~~~~~ 2025 ~~~~~, ~~~~~ 2024 ~~~~~, etc.
-    """
     years: Dict[int, str] = {}
     matches = list(YEAR_RE.finditer(text))
     for i, m in enumerate(matches):
@@ -57,10 +59,6 @@ def split_by_year(text: str) -> Dict[int, str]:
 
 
 def split_contest_sections(year_block: str) -> List[Dict[str, str]]:
-    """
-    Dans un bloc d'année, trouve chaque titre de concours entre ⭐...⭐
-    et renvoie une liste {title, text}.
-    """
     sections: List[Dict[str, str]] = []
     matches = list(STAR_TITLE_RE.finditer(year_block))
     for i, m in enumerate(matches):
@@ -200,7 +198,9 @@ def upsert_to_supabase(entries: List[Dict]) -> None:
         print("No entries to upsert.")
         return
 
-    url = f"{SUPABASE_URL}/rest/v1/{SUPABASE_TABLE}"
+    url = f"{REST_BASE_URL}/{SUPABASE_TABLE}"
+    print(f"Posting to Supabase URL: {url}")
+
     headers = {
         "apikey": SUPABASE_KEY,
         "Authorization": f"Bearer {SUPABASE_KEY}",
@@ -226,10 +226,7 @@ def main():
     print(f"[{datetime.utcnow().isoformat()}] Starting Wall of Fame scrape...")
     entries = scrape_wall_of_fame()
     print(f"Parsed {len(entries)} entries.")
-
-    # Debug : afficher quelques entrées pour vérifier que le parsing marche bien
     print("Sample entries:", entries[:5])
-
     upsert_to_supabase(entries)
     print("Done.")
 
