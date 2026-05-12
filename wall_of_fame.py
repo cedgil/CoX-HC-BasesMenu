@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python3
 import os
 import re
@@ -7,22 +6,20 @@ from typing import List, Dict
 
 import requests
 from bs4 import BeautifulSoup
+from datetime import datetime
 
-from datetime import datetime  # au cas où tu veuilles logger des timestamps
-
-WALL_OF_FAME_URL = "https://forums.homecomingservers.com/topic/44842-base-building-wall-of-fame/"
+WALL_OF_FAME_URL = "https://forums.homecomingservers.com/topic/44842-wall-of-fame/"
 
 SUPABASE_URL = os.environ["SUPABASE_URL"].rstrip("/")
 SUPABASE_KEY = os.environ["SUPABASE_KEY"]
 SUPABASE_TABLE = "base_contest_entries"
 
-# Shards connus
 SHARDS = ["Everlasting", "Excelsior", "Torchbearer", "Indomitable", "Reunion", "Victory"]
 
 
 def fetch_wall_of_fame_html() -> str:
     headers = {
-        "User-Agent": "SugagabeWallOfFameScraper/1.0 (https://github.com/...)"
+        "User-Agent": "SugagabeWallOfFameScraper/1.1 (https://github.com/...)"
     }
     resp = requests.get(WALL_OF_FAME_URL, headers=headers, timeout=30)
     resp.raise_for_status()
@@ -32,14 +29,12 @@ def fetch_wall_of_fame_html() -> str:
 def extract_main_text(html: str) -> str:
     """
     Récupère le texte du premier post (le mur de la gloire).
+    On prend le <main>, c'est plus robuste que de chercher l'article par data-role.
     """
     soup = BeautifulSoup(html, "html.parser")
-
-    article = soup.select_one("article[data-role='comment']")
-    if not article:
-        return soup.get_text(separator="\n", strip=True)
-
-    return article.get_text(separator="\n", strip=True)
+    main = soup.find("main") or soup
+    text = main.get_text(separator="\n", strip=True)
+    return text
 
 
 YEAR_RE = re.compile(r"~+\s*(\d{4})\s*~+")
@@ -47,6 +42,10 @@ STAR_TITLE_RE = re.compile(r"⭐([^⭐]+)⭐")
 
 
 def split_by_year(text: str) -> Dict[int, str]:
+    """
+    Découpe le texte en blocs par année, à partir des lignes
+    ~~~~~ 2025 ~~~~~, ~~~~~ 2024 ~~~~~, etc. [page:6]
+    """
     years = {}
     matches = list(YEAR_RE.finditer(text))
     for i, m in enumerate(matches):
@@ -58,6 +57,10 @@ def split_by_year(text: str) -> Dict[int, str]:
 
 
 def split_contest_sections(year_block: str) -> List[Dict[str, str]]:
+    """
+    Dans un bloc d'année, trouve chaque titre de concours entre ⭐...⭐
+    et renvoie une liste {title, text}.
+    """
     sections = []
     matches = list(STAR_TITLE_RE.finditer(year_block))
     for i, m in enumerate(matches):
@@ -72,19 +75,39 @@ def split_contest_sections(year_block: str) -> List[Dict[str, str]]:
 def normalize_whitespace(s: str) -> str:
     s = s.replace("\u00a0", " ")
     s = s.replace("\r", "\n")
-    return re.sub(r"[ \t]+", " ", s)
+    s = re.sub(r"[ \t]+", " ", s)
+    return s
+
+
+def canonicalize_pipes_and_codes(text: str) -> str:
+    """
+    Le HTML du forum donne souvent :
+      Excelsior\n| DIVINE-29035 |\nElysian Temple\n| By ...
+      Everlasting |\nFAECAVE-31825\n| Fae Caverns |\nBy\n@Aalya [page:6]
+
+    On aplatit ça en :
+      Excelsior | DIVINE-29035 | Elysian Temple | By ...
+      Everlasting | FAECAVE-31825 | Fae Caverns | By ...
+    """
+    # 1) remplace '\n| ' par ' | '
+    text = re.sub(r"\n\|\s*", " | ", text)
+
+    # 2) remplace '|\nCODE' par '| CODE'
+    text = re.sub(r"\|\s*\n([A-Z0-9-]+)", r"| \1", text)
+
+    return text
 
 
 def parse_entries_from_section(year: int, contest_title: str, section_text: str) -> List[Dict]:
-    """
-    Extrait (shard, passcode, base_name) pour un bloc de concours.
-    """
     entries = []
     text = normalize_whitespace(section_text)
+    text = canonicalize_pipes_and_codes(text)
 
-    # Force des retours à la ligne devant les shards pour aider le split
+    # on aide un peu le split en forçant des retours à la ligne avant certains motifs
     for shard in SHARDS:
+        # 'Shard:CODE-123 |' => '\nShard:CODE-123 |'
         text = re.sub(rf"\s*{shard}\s*:", f"\n{shard}:", text)
+        # 'Shard | CODE |' => '\nShard | CODE |'
         text = re.sub(rf"\s*{shard}\s*\|", f"\n{shard} |", text)
 
     lines = [l.strip() for l in text.split("\n") if l.strip()]
@@ -137,7 +160,7 @@ def parse_entries_from_section(year: int, contest_title: str, section_text: str)
             current_shard = shard
             continue
 
-        # 3) 'CODE | NAME | ...' (shard porté par current_shard)
+        # 3) 'CODE | NAME | ...' (avec current_shard défini)
         m_no_shard = entry_no_shard_re.match(line)
         if m_no_shard and current_shard:
             code = m_no_shard.group(1).strip()
@@ -175,11 +198,6 @@ def scrape_wall_of_fame() -> List[Dict]:
 
 
 def upsert_to_supabase(entries: List[Dict]) -> None:
-    """
-    Upsert via l’API REST Supabase avec KEY = SUPABASE_KEY.
-    On utilise on_conflict pour la clé (year, contest_title, shard, passcode),
-    cf. docs PostgREST/Supabase [web:211].
-    """
     if not entries:
         print("No entries to upsert.")
         return
@@ -206,6 +224,7 @@ def upsert_to_supabase(entries: List[Dict]) -> None:
 
 
 def main():
+    print("Secrets chargés OK")
     print(f"[{datetime.utcnow().isoformat()}] Starting Wall of Fame scrape...")
     entries = scrape_wall_of_fame()
     print(f"Parsed {len(entries)} entries.")
@@ -214,6 +233,4 @@ def main():
 
 
 if __name__ == "__main__":
-    # petit check optionnel comme dans ton snippet
-    print("Secrets chargés OK")
     main()
