@@ -1,4 +1,4 @@
-name: TEST WHATEVER
+name: TEST CoX Test icons
 
 on:
   workflow_dispatch:
