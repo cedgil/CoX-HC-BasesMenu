@@ -17,7 +17,18 @@ ICON_CATEGORY_URL = (
 )
 
 HEADERS = {
-    "User-Agent": "HC-Icon-Scraper/2.0"
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/136.0 Safari/537.36"
+    ),
+    "Accept": (
+        "text/html,application/xhtml+xml,"
+        "application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+    ),
+    "Accept-Language": "en-US,en;q=0.5",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
 }
 
 PAGE_SIZE = 40
@@ -40,6 +51,35 @@ def chunked(lst, size):
     for i in range(0, len(lst), size):
         yield lst[i:i + size]
 
+# =========================================================
+# HTTP DEBUG
+# =========================================================
+
+def fetch_url(url):
+
+    print("================================")
+    print("FETCHING URL")
+    print(url)
+    print("================================")
+
+    r = requests.get(
+        url,
+        headers=HEADERS,
+        timeout=60
+    )
+
+    print("STATUS:", r.status_code)
+    print("FINAL URL:", r.url)
+    print("CONTENT TYPE:", r.headers.get("content-type"))
+
+    print()
+    print("HTML PREVIEW:")
+    print(r.text[:2000])
+    print()
+
+    r.raise_for_status()
+
+    return r.text
 
 # =========================================================
 # MACRO IMAGES
@@ -51,15 +91,12 @@ def scrape_macro_images():
     print("SCRAPING MACRO IMAGES")
     print("================================")
 
-    r = requests.get(
-        MACRO_IMAGE_URL,
-        headers=HEADERS,
-        timeout=60
-    )
+    text = fetch_url(MACRO_IMAGE_URL)
 
-    r.raise_for_status()
-
-    text = r.text
+    # -----------------------------------------------------
+    # récupère :
+    # /macro_image "XXX" "Tooltip" "Command"
+    # -----------------------------------------------------
 
     matches = re.findall(
         r'/macro_image\s+"([^"]+)"\s+"Tooltip"\s+"Command"',
@@ -72,7 +109,7 @@ def scrape_macro_images():
     print(f"TOTAL MACRO IMAGES: {len(unique)}")
     print()
 
-    print("FIRST 50:")
+    print("FIRST 50 MACRO IMAGES:")
     for icon in unique[:50]:
         print(icon)
 
@@ -87,30 +124,20 @@ def scrape_macro_images():
 
         ICON_CATEGORIES[f"Macro {category}"].append(icon)
 
-
 # =========================================================
-# CATEGORY PAGE
+# WIKI ICON PAGES
 # =========================================================
 
 def scrape_icon_page(letter, url):
 
     print("================================")
     print(f"SCRAPING PAGE {letter}")
-    print(url)
     print("================================")
 
-    r = requests.get(
-        url,
-        headers=HEADERS,
-        timeout=60
-    )
-
-    r.raise_for_status()
-
-    html = r.text
+    html = fetch_url(url)
 
     # -----------------------------------------------------
-    # récupérer titres wiki
+    # récupérer tous les title=""
     # -----------------------------------------------------
 
     matches = re.findall(
@@ -127,9 +154,9 @@ def scrape_icon_page(letter, url):
         if not title:
             continue
 
-        # exclusions
         lowered = title.lower()
 
+        # exclusions
         if any(x in lowered for x in [
             "category:",
             "template:",
@@ -152,34 +179,25 @@ def scrape_icon_page(letter, url):
     print(f"FOUND {len(valid)} ICONS")
     print()
 
-    print("FIRST 30:")
-    for icon in valid[:30]:
+    print("FIRST 50 ICONS:")
+    for icon in valid[:50]:
         print(icon)
 
     print()
 
     ICON_CATEGORIES[f"Wiki {letter}"].extend(valid)
 
-
 # =========================================================
-# WIKI CATEGORY
+# CATEGORY SCRAPER
 # =========================================================
 
 def scrape_icon_categories():
 
     print("================================")
-    print("SCRAPING WIKI CATEGORY")
+    print("SCRAPING ICON IMAGE CATEGORY")
     print("================================")
 
-    r = requests.get(
-        ICON_CATEGORY_URL,
-        headers=HEADERS,
-        timeout=60
-    )
-
-    r.raise_for_status()
-
-    html = r.text
+    html = fetch_url(ICON_CATEGORY_URL)
 
     # -----------------------------------------------------
     # trouver pages A-Z
@@ -217,9 +235,8 @@ def scrape_icon_categories():
 
         scrape_icon_page(letter, url)
 
-
 # =========================================================
-# MENU
+# MENU GENERATION
 # =========================================================
 
 def write_locked_option(f, icon_name):
@@ -265,6 +282,10 @@ def generate_menu():
         f.write('\tTitle "ICON BROWSER"\n')
         f.write('\tDIVIDER\n')
 
+        # -------------------------------------------------
+        # catégories
+        # -------------------------------------------------
+
         for category in sorted(ICON_CATEGORIES.keys()):
 
             icons = sorted(set(
@@ -288,10 +309,18 @@ def generate_menu():
             f.write(f'\t\tTitle "{category}"\n')
             f.write('\t\tDIVIDER\n')
 
+            # ---------------------------------------------
+            # pagination
+            # ---------------------------------------------
+
             if len(pages) == 1:
 
                 for icon in pages[0]:
-                    write_locked_option(f, icon)
+
+                    write_locked_option(
+                        f,
+                        icon
+                    )
 
             else:
 
@@ -312,7 +341,6 @@ def generate_menu():
 
     print()
     print(f"MENU WRITTEN: {OUTPUT_FILE}")
-
 
 # =========================================================
 # MAIN
