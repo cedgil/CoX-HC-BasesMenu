@@ -1,7 +1,6 @@
+```python
 import re
-import math
 import requests
-from bs4 import BeautifulSoup
 from collections import defaultdict
 
 # =========================================================
@@ -10,24 +9,16 @@ from collections import defaultdict
 
 OUTPUT_FILE = "icons_debug.mnu"
 
-# ---------------------------------------------------------
-# MACRO IMAGE PAGE
-# ---------------------------------------------------------
-
 MACRO_IMAGE_URL = (
     "https://homecoming.wiki/wiki/Macro_image_(Slash_Command)"
 )
-
-# ---------------------------------------------------------
-# ICON IMAGE CATEGORY
-# ---------------------------------------------------------
 
 ICON_CATEGORY_URL = (
     "https://homecoming.wiki/wiki/Category:Icon_Images"
 )
 
 HEADERS = {
-    "User-Agent": "HC-Icon-Scraper/1.0"
+    "User-Agent": "HC-Icon-Scraper/2.0"
 }
 
 PAGE_SIZE = 40
@@ -42,8 +33,8 @@ ICON_CATEGORIES = defaultdict(list)
 # HELPERS
 # =========================================================
 
-def clean(text):
-    return (text or "").strip()
+def clean(v):
+    return (v or "").strip()
 
 
 def chunked(lst, size):
@@ -51,12 +42,8 @@ def chunked(lst, size):
         yield lst[i:i + size]
 
 
-def sanitize_menu_name(name):
-    return re.sub(r'[^A-Za-z0-9_]', '_', name)
-
-
 # =========================================================
-# MACRO IMAGE SCRAPER
+# MACRO IMAGES
 # =========================================================
 
 def scrape_macro_images():
@@ -75,9 +62,6 @@ def scrape_macro_images():
 
     text = r.text
 
-    # récupère :
-    # /macro_image "XXX" "Tooltip" "Command"
-
     matches = re.findall(
         r'/macro_image\s+"([^"]+)"\s+"Tooltip"\s+"Command"',
         text
@@ -85,26 +69,36 @@ def scrape_macro_images():
 
     unique = sorted(set(matches))
 
-    print(f"{len(unique)} macro images found")
+    print()
+    print(f"TOTAL MACRO IMAGES: {len(unique)}")
+    print()
+
+    print("FIRST 50:")
+    for icon in unique[:50]:
+        print(icon)
+
+    print()
 
     for icon in unique:
 
-        # catégorie = préfixe avant _
         if "_" in icon:
             category = icon.split("_")[0]
         else:
             category = "Misc"
 
-        ICON_CATEGORIES[f"Macro - {category}"].append(icon)
+        ICON_CATEGORIES[f"Macro {category}"].append(icon)
 
 
 # =========================================================
-# ICON IMAGE CATEGORY SCRAPER
+# CATEGORY PAGE
 # =========================================================
 
-def scrape_icon_category_page(url, category_name):
+def scrape_icon_page(letter, url):
 
-    print(f"SCRAPING: {url}")
+    print("================================")
+    print(f"SCRAPING PAGE {letter}")
+    print(url)
+    print("================================")
 
     r = requests.get(
         url,
@@ -114,50 +108,68 @@ def scrape_icon_category_page(url, category_name):
 
     r.raise_for_status()
 
-    soup = BeautifulSoup(r.text, "html.parser")
+    html = r.text
 
     # -----------------------------------------------------
-    # récupérer tous les liens image
+    # récupérer titres wiki
     # -----------------------------------------------------
 
-    links = soup.find_all("a")
+    matches = re.findall(
+        r'title="([^"]+)"',
+        html
+    )
 
-    found = []
+    valid = []
 
-    for a in links:
+    for title in matches:
 
-        title = clean(a.get("title"))
+        title = clean(title)
 
         if not title:
             continue
 
-        # éviter pollution wiki
-        if any(x in title.lower() for x in [
+        # exclusions
+        lowered = title.lower()
+
+        if any(x in lowered for x in [
             "category:",
-            "special:",
             "template:",
+            "special:",
             "help:",
-            "file:"
+            "file:",
+            "mediawiki",
+            "semantic"
         ]):
             continue
 
-        # garder uniquement trucs plausibles
-        if re.match(r"^[A-Za-z0-9_\-\.]+$", title):
+        # garder noms plausibles
+        if re.match(r'^[A-Za-z0-9_\-\.]+$', title):
 
-            found.append(title)
+            valid.append(title)
 
-    found = sorted(set(found))
+    valid = sorted(set(valid))
 
-    print(f"{len(found)} icons found")
+    print()
+    print(f"FOUND {len(valid)} ICONS")
+    print()
 
-    for icon in found:
-        ICON_CATEGORIES[category_name].append(icon)
+    print("FIRST 30:")
+    for icon in valid[:30]:
+        print(icon)
+
+    print()
+
+    ICON_CATEGORIES[f"Wiki {letter}"].extend(valid)
 
 
-def scrape_icon_images():
+# =========================================================
+# WIKI CATEGORY
+# =========================================================
+
+def scrape_icon_categories():
 
     print("================================")
-    print("SCRAPING ICON IMAGE CATEGORIES")
+    print("SCRAPING WIKI CATEGORY")
     print("================================")
 
     r = requests.get(
@@ -168,65 +180,65 @@ def scrape_icon_images():
 
     r.raise_for_status()
 
-    soup = BeautifulSoup(r.text, "html.parser")
+    html = r.text
 
     # -----------------------------------------------------
-    # récupérer sous-pages A-T
+    # trouver pages A-Z
     # -----------------------------------------------------
 
-    links = soup.find_all("a")
+    subpages = re.findall(
+        r'href="([^"]+/Icon_Images/([A-Z]))"',
+        html
+    )
 
-    subpages = []
+    found = []
 
-    for a in links:
+    for href, letter in subpages:
 
-        href = a.get("href", "")
-        title = clean(a.get_text())
+        url = "https://homecoming.wiki" + href
 
-        if re.match(r"^[A-Z]$", title):
+        found.append((letter, url))
 
-            full_url = "https://homecoming.wiki" + href
+    found = sorted(set(found))
 
-            subpages.append((title, full_url))
+    print()
+    print(f"SUBPAGES FOUND: {len(found)}")
+    print()
 
-    subpages = sorted(set(subpages))
+    for letter, url in found:
+        print(letter, url)
 
-    print(f"{len(subpages)} subpages found")
+    print()
 
     # -----------------------------------------------------
     # scraper chaque page
     # -----------------------------------------------------
 
-    for letter, url in subpages:
+    for letter, url in found:
 
-        scrape_icon_category_page(
-            url,
-            f"Wiki - {letter}"
-        )
+        scrape_icon_page(letter, url)
 
 
 # =========================================================
-# MENU GENERATION
+# MENU
 # =========================================================
 
 def write_locked_option(f, icon_name):
 
-    display = icon_name[:80]
-
     f.write('\t\tLockedOption\n')
     f.write('\t\t{\n')
-    f.write(f'\t\t\tDisplayName "{display}"\n')
+    f.write(f'\t\t\tDisplayName "{icon_name}"\n')
     f.write('\t\t\tCommand ""\n')
     f.write(f'\t\t\tIcon "{icon_name}"\n')
     f.write('\t\t}\n')
 
 
-def write_icon_page(f, page_name, icons):
+def write_page(f, page_name, icons):
 
     f.write(f'\t\tMenu "{page_name}"\n')
     f.write('\t\t{\n')
 
-    f.write(f'\t\t\tTitle "{page_name.upper()}"\n')
+    f.write(f'\t\t\tTitle "{page_name}"\n')
     f.write('\t\t\tDIVIDER\n')
 
     for icon in icons:
@@ -254,10 +266,6 @@ def generate_menu():
         f.write('\tTitle "ICON BROWSER"\n')
         f.write('\tDIVIDER\n')
 
-        # -------------------------------------------------
-        # categories
-        # -------------------------------------------------
-
         for category in sorted(ICON_CATEGORIES.keys()):
 
             icons = sorted(set(
@@ -267,56 +275,44 @@ def generate_menu():
             if not icons:
                 continue
 
-            # ---------------------------------------------
-            # pagination
-            # ---------------------------------------------
+            print()
+            print(f"{category}: {len(icons)} icons")
 
             pages = list(chunked(
                 icons,
                 PAGE_SIZE
             ))
 
+            f.write(f'\tMenu "{category}"\n')
+            f.write('\t{\n')
+
+            f.write(f'\t\tTitle "{category}"\n')
+            f.write('\t\tDIVIDER\n')
+
             if len(pages) == 1:
-
-                f.write(f'\tMenu "{category}"\n')
-                f.write('\t{\n')
-
-                f.write(f'\t\tTitle "{category.upper()}"\n')
-                f.write('\t\tDIVIDER\n')
 
                 for icon in pages[0]:
                     write_locked_option(f, icon)
 
-                f.write('\t}\n')
-
             else:
-
-                f.write(f'\tMenu "{category}"\n')
-                f.write('\t{\n')
-
-                f.write(f'\t\tTitle "{category.upper()}"\n')
-                f.write('\t\tDIVIDER\n')
 
                 for idx, page in enumerate(
                     pages,
                     start=1
                 ):
 
-                    page_name = (
-                        f"Page {idx}"
-                    )
-
-                    write_icon_page(
+                    write_page(
                         f,
-                        page_name,
+                        f"Page {idx}",
                         page
                     )
 
-                f.write('\t}\n')
+            f.write('\t}\n')
 
         f.write('}\n')
 
-    print(f"Menu written to: {OUTPUT_FILE}")
+    print()
+    print(f"MENU WRITTEN: {OUTPUT_FILE}")
 
 
 # =========================================================
@@ -327,10 +323,11 @@ def main():
 
     scrape_macro_images()
 
-    scrape_icon_images()
+    scrape_icon_categories()
 
     generate_menu()
 
+    print()
     print("================================")
     print("DONE")
     print("================================")
@@ -339,3 +336,4 @@ def main():
 if __name__ == "__main__":
 
     main()
+```
