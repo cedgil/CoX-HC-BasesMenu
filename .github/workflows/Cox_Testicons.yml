@@ -1,17 +1,14 @@
-name: TEST CoX Test icons
+name: CoH Icon Scraper
 
 on:
   workflow_dispatch:
 
-  schedule:
-    - cron: "0 */6 * * *"
-
 jobs:
-  scraper:
+  scrape-icons:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Setup Python
@@ -20,13 +17,19 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
-        - name: Install dependencies
-  run: |
-    pip install requests beautifulsoup4
+        run: |
+          pip install requests beautifulsoup4 lxml
 
-      - name: Run scraper
+      - name: Run icon scraper
         env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-        run: python Cox_Testicons.py
+          PYTHONUNBUFFERED: "1"
+        run: |
+          python Cox_Testicons.py
+
+      - name: Upload generated files
+        uses: actions/upload-artifact@v4
+        with:
+          name: coh-icons-output
+          path: |
+            output/icons_menu.mnu
+            output/icons_debug.txt
