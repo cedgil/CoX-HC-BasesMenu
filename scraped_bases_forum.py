@@ -14,7 +14,7 @@ SUPABASE_KEY = os.environ["SUPABASE_KEY"]
 
 TABLE_NAME = "scraped_bases_forum"
 
-API_URL = f"{SUPABASE_URL}/rest/v1/{TABLE_NAME}"
+API_URL = f"{SUPABASE_URL}/{TABLE_NAME}"
 
 HEADERS = {
     "apikey": SUPABASE_KEY,
