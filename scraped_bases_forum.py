@@ -1,15 +1,20 @@
-import requests
+import os
 import re
-import time
+import sys
+import requests
 from bs4 import BeautifulSoup
+from urllib.parse import urljoin
 
 # ============================================================
-# SUPABASE
+# SUPABASE CONFIG
 # ============================================================
 
-SUPABASE_URL = "https://njswkwbacffyayhzivzh.supabase.co/rest/v1/scraped_bases_forum"
+SUPABASE_URL = os.environ["SUPABASE_URL"].rstrip("/")
+SUPABASE_KEY = os.environ["SUPABASE_KEY"]
 
-SUPABASE_KEY = "TON_SUPABASE_KEY"
+TABLE_NAME = "scraped_bases_forum"
+
+API_URL = f"{SUPABASE_URL}/rest/v1/{TABLE_NAME}"
 
 HEADERS = {
     "apikey": SUPABASE_KEY,
@@ -19,10 +24,11 @@ HEADERS = {
 }
 
 # ============================================================
-# SOURCES
+# SOURCES CONFIG
 # ============================================================
 
 SOURCES = [
+
     {
         "url": "https://forums.homecomingservers.com/topic/62785-list-your-base-for-the-noncompetitive-our-based-showcase/",
 
@@ -44,24 +50,21 @@ SOURCES = [
             "category": "The category your base is entering under:"
         }
     }
+
 ]
 
 # ============================================================
-# BAD VALUES / TEMPLATE FILTER
+# FILTERS
 # ============================================================
 
 BAD_VALUES = [
-    "Shard/Server:",
-    "Base Code:",
-    "Base Owner:",
-    "Code, please",
+    "",
+    "n/a",
+    "none",
+    "unknown",
+    "code, please",
     "where is the base",
-    "Your sg here",
-    "The shard it is located on:",
-    "The passcode for entry:",
-    "The category your base is entering under:",
-    "Contributing builders’ names or Global handles:",
-    "Special or Hidden Features, if any:"
+    "where does this fit?",
 ]
 
 # ============================================================
@@ -69,70 +72,103 @@ BAD_VALUES = [
 # ============================================================
 
 def clean_text(text):
-    if not text:
-        return ""
 
     text = text.replace("\xa0", " ")
-    text = text.replace("\n", " ")
-    text = text.replace("\r", " ")
+    text = text.replace("\u200b", "")
+    text = text.strip()
 
-    return " ".join(text.split()).strip()
+    return text
 
 
 def extract_field(content, keyword):
-    pattern = rf"{re.escape(keyword)}\s*(.+)"
 
-    match = re.search(pattern, content, re.IGNORECASE)
+    lines = content.splitlines()
 
-    if not match:
-        return None
+    for line in lines:
 
-    value = clean_text(match.group(1))
+        clean_line = clean_text(line)
 
-    if value in BAD_VALUES:
-        return None
+        if clean_line.lower().startswith(keyword.lower()):
 
-    return value
+            value = clean_line[len(keyword):].strip()
+
+            if value.lower() in BAD_VALUES:
+                return None
+
+            if not value:
+                return None
+
+            return value
+
+    return None
 
 
-# ============================================================
-# DISCOVER PAGES
-# ============================================================
-
-def discover_pages(base_url):
-    pages = [base_url]
+def get_total_pages(url):
 
     print("=" * 60)
-    print("FETCHING")
-    print(base_url)
+    print("DISCOVERING PAGES")
+    print(url)
     print("=" * 60)
 
-    r = requests.get(base_url)
+    r = requests.get(url)
 
     print("STATUS:", r.status_code)
 
+    if r.status_code != 200:
+        return [url]
+
     soup = BeautifulSoup(r.text, "html.parser")
+
+    pages = set()
+    pages.add(url)
 
     for a in soup.find_all("a", href=True):
 
         href = a["href"]
 
-        if "/page/" in href and base_url.split("/topic/")[0] in href:
+        if "/page/" in href:
 
-            clean = href.split("?")[0]
+            full_url = urljoin(url, href)
 
-            if clean not in pages:
-                pages.append(clean)
+            full_url = full_url.split("?")[0]
 
-                print("DISCOVERED PAGE:", clean)
+            if full_url not in pages:
 
-    print("TOTAL PAGES FOUND:", len(pages))
+                pages.add(full_url)
 
-    return pages
+                print("DISCOVERED PAGE:", full_url)
+
+    return sorted(pages)
+
+
+def fetch_page(url):
+
+    print("=" * 60)
+    print("FETCHING")
+    print(url)
+    print("=" * 60)
+
+    r = requests.get(url)
+
+    print("STATUS:", r.status_code)
+
+    if r.status_code != 200:
+        return None
+
+    return BeautifulSoup(r.text, "html.parser")
+
+
+def get_posts(soup):
+
+    posts = soup.find_all("article")
+
+    print(f"FOUND {len(posts)} POSTS")
+
+    return posts
 
 
 # ============================================================
-# SUPABASE CHECK
+# SUPABASE
 # ============================================================
 
 def base_exists(base_code, shard):
@@ -144,25 +180,21 @@ def base_exists(base_code, shard):
     }
 
     r = requests.get(
-        SUPABASE_URL,
+        API_URL,
         headers=HEADERS,
         params=params
     )
 
     print("CHECK STATUS:", r.status_code)
-    print("CHECK RESPONSE:", r.text)
 
     if r.status_code != 200:
+        print("CHECK RESPONSE:", r.text)
         return False
 
     data = r.json()
 
     return len(data) > 0
 
-
-# ============================================================
-# INSERT
-# ============================================================
 
 def insert_base(data):
 
@@ -175,7 +207,7 @@ def insert_base(data):
     }
 
     r = requests.post(
-        SUPABASE_URL,
+        API_URL,
         headers=HEADERS,
         json=payload
     )
@@ -183,92 +215,106 @@ def insert_base(data):
     print("UPSERT STATUS:", r.status_code)
     print("UPSERT RESPONSE:", r.text)
 
-
-# ============================================================
-# SCRAPE PAGE
-# ============================================================
-
-def scrape_page(url, field_map):
-
-    print("=" * 60)
-    print("FETCHING")
-    print(url)
-    print("=" * 60)
-
-    r = requests.get(url)
-
-    print("STATUS:", r.status_code)
-
-    soup = BeautifulSoup(r.text, "html.parser")
-
-    posts = soup.find_all("article")
-
-    print("FOUND", len(posts), "POSTS")
-
-    for post in posts:
-
-        text = clean_text(post.get_text("\n"))
-
-        supergroup_name = extract_field(
-            text,
-            field_map["supergroup_name"]
-        )
-
-        shard = extract_field(
-            text,
-            field_map["shard"]
-        )
-
-        base_code = extract_field(
-            text,
-            field_map["base_code"]
-        )
-
-        category = extract_field(
-            text,
-            field_map["category"]
-        )
-
-        if not supergroup_name:
-            print("SKIPPED POST - MISSING supergroup_name")
-            continue
-
-        if not shard:
-            print("SKIPPED POST - MISSING shard")
-            continue
-
-        if not base_code:
-            print("SKIPPED POST - MISSING base_code")
-            continue
-
-        if not category:
-            print("SKIPPED POST - MISSING category")
-            continue
-
-        print("-" * 40)
-        print("BASE FOUND")
-        print(supergroup_name)
-        print(shard)
-        print(base_code)
-        print(category)
-
-        exists = base_exists(base_code, shard)
-
-        if exists:
-            print(f"ALREADY EXISTS: {base_code} ({shard})")
-            continue
-
-        insert_base({
-            "supergroup_name": supergroup_name,
-            "shard": shard,
-            "base_code": base_code,
-            "category": category,
-            "source_url": url
-        })
-
+    if r.status_code in [200, 201]:
         print("INSERTED")
+        return True
 
-        time.sleep(0.25)
+    print("INSERT FAILED")
+    return False
+
+
+# ============================================================
+# PROCESS
+# ============================================================
+
+def process_post(post, source):
+
+    text = clean_text(post.get_text("\n"))
+
+    fields = source["fields"]
+
+    data = {}
+
+    for field_name, keyword in fields.items():
+
+        value = extract_field(text, keyword)
+
+        data[field_name] = value
+
+    missing = []
+
+    for required in fields.keys():
+
+        if not data.get(required):
+            missing.append(required)
+
+    if missing:
+
+        for m in missing:
+            print(f"SKIPPED POST - MISSING {m}")
+
+        return
+
+    print("-" * 40)
+    print("BASE FOUND")
+    print(data["supergroup_name"])
+    print(data["shard"])
+    print(data["base_code"])
+    print(data["category"])
+
+    exists = base_exists(
+        data["base_code"],
+        data["shard"]
+    )
+
+    if exists:
+
+        print(
+            f"ALREADY EXISTS: "
+            f'{data["base_code"]} ({data["shard"]})'
+        )
+
+        return
+
+    success = insert_base({
+        "supergroup_name": data["supergroup_name"],
+        "shard": data["shard"],
+        "base_code": data["base_code"],
+        "category": data["category"],
+        "source_url": source["url"]
+    })
+
+    if success:
+        print("SUCCESSFULLY INSERTED")
+
+
+def process_source(source):
+
+    print("=" * 60)
+    print("PROCESSING SOURCE")
+    print(source["url"])
+    print("=" * 60)
+
+    pages = get_total_pages(source["url"])
+
+    print(f"TOTAL PAGES FOUND: {len(pages)}")
+
+    for index, page_url in enumerate(pages, start=1):
+
+        print("=" * 60)
+        print(f"PAGE {index}")
+        print("=" * 60)
+
+        soup = fetch_page(page_url)
+
+        if not soup:
+            continue
+
+        posts = get_posts(soup)
+
+        for post in posts:
+
+            process_post(post, source)
 
 
 # ============================================================
@@ -283,27 +329,7 @@ def main():
 
     for source in SOURCES:
 
-        print("=" * 60)
-        print("PROCESSING SOURCE")
-        print(source["url"])
-        print("=" * 60)
-
-        pages = discover_pages(source["url"])
-
-        page_number = 1
-
-        for page in pages:
-
-            print("=" * 60)
-            print(f"PAGE {page_number}")
-            print("=" * 60)
-
-            scrape_page(
-                page,
-                source["fields"]
-            )
-
-            page_number += 1
+        process_source(source)
 
     print("=" * 60)
     print("DONE")
@@ -315,4 +341,20 @@ def main():
 # ============================================================
 
 if __name__ == "__main__":
-    main()
+
+    try:
+
+        main()
+
+    except KeyboardInterrupt:
+
+        print("\nSTOPPED")
+
+    except Exception as e:
+
+        print("=" * 60)
+        print("ERROR")
+        print("=" * 60)
+        print(str(e))
+
+        sys.exit(1)
