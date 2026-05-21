@@ -348,5 +348,3 @@ if __name__ == "__main__":
         print("ERROR")
         print("=" * 60)
         print(e)
-
-        input("Press ENTER to exit...")
