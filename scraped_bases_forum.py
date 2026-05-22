@@ -73,6 +73,29 @@ SUPABASE_HEADERS = {
 }
 
 # =========================================================
+# SHARD NORMALIZATION
+# =========================================================
+
+SHARD_ALIASES = {
+
+    "torch": "Torchbearer",
+    "torchbearer": "Torchbearer",
+
+    "excel": "Excelsior",
+    "excelsior": "Excelsior",
+
+    "ever": "Everlasting",
+    "everlasting": "Everlasting",
+
+    "reunion": "Reunion",
+
+    "indo": "Indomitable",
+    "indomitable": "Indomitable",
+
+    "victory": "Victory"
+}
+
+# =========================================================
 # HELPERS
 # =========================================================
 
@@ -83,57 +106,120 @@ def clean(text):
 
     text = text.replace("\u00a0", " ")
 
-    return re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"\s+", " ", text)
+
+    return text.strip()
 
 
-def normalize_text(text):
+def normalize_shard(shard):
 
-    text = text.replace("\r", "\n")
-    text = re.sub(r"\n+", "\n", text)
+    shard = clean(shard).lower()
 
-    return text
+    for alias, proper in SHARD_ALIASES.items():
+
+        if shard.startswith(alias):
+            return proper
+
+    return shard.title()
 
 
-def extract_between(text, start_label, all_labels):
+def remove_forum_garbage(text):
 
-    start = text.lower().find(start_label.lower())
+    lines = []
+
+    for line in text.splitlines():
+
+        line = clean(line)
+
+        if not line:
+            continue
+
+        if line.startswith("Posted"):
+            continue
+
+        if line.startswith("Edited"):
+            continue
+
+        if re.match(r"^January \d+", line):
+            continue
+
+        if line in ["(edited)"]:
+            continue
+
+        lines.append(line)
+
+    return "\n".join(lines)
+
+
+def split_base_blocks(text):
+
+    pattern = re.compile(
+        r"(Supergroup Name:|Your base’s name:)",
+        re.IGNORECASE
+    )
+
+    matches = list(pattern.finditer(text))
+
+    blocks = []
+
+    for i, match in enumerate(matches):
+
+        start = match.start()
+
+        end = (
+            matches[i + 1].start()
+            if i + 1 < len(matches)
+            else len(text)
+        )
+
+        block = text[start:end].strip()
+
+        if block:
+            blocks.append(block)
+
+    return blocks
+
+
+def extract_field(block, label, all_labels):
+
+    start = block.lower().find(label.lower())
 
     if start == -1:
         return None
 
-    start += len(start_label)
+    start += len(label)
 
     next_positions = []
 
-    for label in all_labels:
+    for other in all_labels:
 
-        if label == start_label:
+        if other == label:
             continue
 
-        pos = text.lower().find(label.lower(), start)
+        pos = block.lower().find(other.lower(), start)
 
         if pos != -1:
             next_positions.append(pos)
 
-    end = min(next_positions) if next_positions else len(text)
+    end = min(next_positions) if next_positions else len(block)
 
-    value = text[start:end]
+    value = block[start:end]
 
     value = clean(value)
 
-    return value if value else None
+    return value
 
 
-def extract_fields(raw_text, fields):
-
-    data = {}
+def extract_fields(block, fields):
 
     labels = list(fields.values())
 
+    data = {}
+
     for key, label in fields.items():
 
-        value = extract_between(
-            raw_text,
+        value = extract_field(
+            block,
             label,
             labels
         )
@@ -144,43 +230,29 @@ def extract_fields(raw_text, fields):
     return data
 
 
-def is_valid_entry(data):
+def extract_description(block):
 
-    required = [
-        "supergroup_name",
-        "shard",
-        "base_code",
-        "category"
+    labels = [
+        "Description:",
+        "Description :"
     ]
 
-    for field in required:
+    for label in labels:
 
-        if field not in data:
-            return False
+        pos = block.lower().find(label.lower())
 
-        value = data[field].strip()
+        if pos != -1:
 
-        if len(value) < 2:
-            return False
+            desc = block[pos + len(label):]
 
-    if data["supergroup_name"] in [
-        "Shard/Server:",
-        "Your",
-        "The"
-    ]:
-        return False
+            desc = re.split(
+                r"Edited\s+January",
+                desc
+            )[0]
 
-    if data["base_code"] in [
-        "Base",
-        "Code",
-        "The"
-    ]:
-        return False
+            return clean(desc)
 
-    if not re.search(r"-\d+", data["base_code"]):
-        return False
-
-    return True
+    return None
 
 
 def get_post_content(article):
@@ -200,7 +272,7 @@ def get_post_content(article):
             text = el.get_text("\n", strip=True)
 
             if text:
-                return normalize_text(text)
+                return remove_forum_garbage(text)
 
     return ""
 
@@ -218,10 +290,10 @@ def get_post_author(article):
 
         if el:
 
-            text = clean(el.get_text())
+            txt = clean(el.get_text())
 
-            if text:
-                return text
+            if txt:
+                return txt
 
     return None
 
@@ -240,10 +312,20 @@ def get_post_date(article):
     return None
 
 
-def base_exists(base_code):
+def get_page_number(url):
+
+    m = re.search(r"page/(\d+)", url)
+
+    if m:
+        return int(m.group(1))
+
+    return 1
+
+
+def base_exists(code):
 
     params = {
-        "base_code": f"eq.{base_code}",
+        "base_code": f"eq.{code}",
         "select": "id"
     }
 
@@ -275,10 +357,9 @@ def insert_base(payload):
     print("INSERT STATUS:", r.status_code)
 
     if r.text:
-        print(r.text[:500])
+        print(r.text[:300])
 
     return r.status_code in [200, 201]
-
 
 # =========================================================
 # SCRAPER
@@ -312,65 +393,99 @@ def scrape_source(source):
         if not raw_post:
             continue
 
-        parsed = extract_fields(
-            raw_post,
-            source["fields"]
-        )
+        blocks = split_base_blocks(raw_post)
 
-        if not is_valid_entry(parsed):
-            continue
+        for block in blocks:
 
-        print("--------------------------------------------------")
-        print("PARSED DATA:")
-        print(parsed)
+            parsed = extract_fields(
+                block,
+                source["fields"]
+            )
 
-        if base_exists(parsed["base_code"]):
-            print("ALREADY EXISTS")
-            continue
+            if not parsed:
+                continue
 
-        payload = {
+            if "base_code" not in parsed:
+                continue
 
-            "supergroup_name": parsed["supergroup_name"],
+            code_match = re.search(
+                r"[A-Z0-9]+-\d+",
+                parsed["base_code"],
+                re.IGNORECASE
+            )
 
-            "shard": parsed["shard"],
+            if not code_match:
+                continue
 
-            "base_code": parsed["base_code"],
+            parsed["base_code"] = code_match.group(0).upper()
 
-            "category": parsed["category"],
+            parsed["shard"] = normalize_shard(
+                parsed.get("shard", "")
+            )
 
-            "source_topic": source["url"].split("/")[-2],
+            parsed["category"] = clean(
+                parsed.get("category", "").split(
+                    "Special or Hidden"
+                )[0]
+            )
 
-            "source_url": source["url"],
+            parsed["supergroup_name"] = clean(
+                parsed.get("supergroup_name")
+            )
 
-            "source_page": 1,
+            description = extract_description(block)
 
-            "post_author": get_post_author(article),
+            print("--------------------------------------------------")
+            print("PARSED DATA:")
+            print(parsed)
 
-            "post_date": get_post_date(article),
+            if base_exists(parsed["base_code"]):
+                print("ALREADY EXISTS")
+                continue
 
-            "description": raw_post[:4000],
+            payload = {
 
-            "raw_post": raw_post
+                "supergroup_name": parsed["supergroup_name"],
 
-        }
+                "shard": parsed["shard"],
 
-        print("----------------------------------------")
-        print("BASE FOUND")
-        print(payload["supergroup_name"])
-        print(payload["shard"])
-        print(payload["base_code"])
-        print(payload["category"])
+                "base_code": parsed["base_code"],
 
-        ok = insert_base(payload)
+                "category": parsed["category"],
 
-        if ok:
-            inserted += 1
-            print("INSERTED")
-        else:
-            print("INSERT FAILED")
+                "description": description,
+
+                "raw_post": block,
+
+                "source_topic": source["url"].split("/")[-2],
+
+                "source_url": source["url"],
+
+                "source_page": get_page_number(
+                    source["url"]
+                ),
+
+                "post_author": get_post_author(article),
+
+                "post_date": get_post_date(article)
+            }
+
+            print("----------------------------------------")
+            print("BASE FOUND")
+            print(payload["supergroup_name"])
+            print(payload["shard"])
+            print(payload["base_code"])
+            print(payload["category"])
+
+            ok = insert_base(payload)
+
+            if ok:
+                inserted += 1
+                print("INSERTED")
+            else:
+                print("INSERT FAILED")
 
     return inserted
-
 
 # =========================================================
 # MAIN
@@ -395,8 +510,6 @@ def main():
     print(f"TOTAL UPSERTED: {total}")
     print("============================================================")
 
-
-# =========================================================
 
 if __name__ == "__main__":
     main()
