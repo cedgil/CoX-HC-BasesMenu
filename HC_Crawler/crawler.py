@@ -1,52 +1,106 @@
 import requests
-
 from bs4 import BeautifulSoup
+from urllib.parse import urljoin
 
-from config import BASE_SECTION_URL
+BASE_FORUM_URL = (
+    "https://forums.homecomingservers.com/forum/30-base-construction/"
+)
 
-# =========================================================
+HEADERS = {
+    "User-Agent": "HC-Forum-Crawler/1.0"
+}
 
-def discover_topics():
 
-    headers = {
-        "User-Agent": "HC-BaseCrawler/1.0"
-    }
+def fetch_page(url):
 
     r = requests.get(
-        BASE_SECTION_URL,
-        headers=headers,
+        url,
+        headers=HEADERS,
         timeout=30
     )
 
     r.raise_for_status()
 
-    soup = BeautifulSoup(r.text, "html.parser")
+    return r.text
+
+
+def extract_topics_from_page(html):
+
+    soup = BeautifulSoup(html, "html.parser")
 
     topics = []
 
-    for a in soup.select("a[href*='/topic/']"):
+    seen = set()
 
-        href = a.get("href", "")
+    # =====================================================
+    # NEW FORUM SELECTORS
+    # =====================================================
 
-        if "/topic/" not in href:
-            continue
+    selectors = [
 
-        if href.startswith("/"):
-            href = (
-                "https://forums.homecomingservers.com"
-                + href
+        "a[data-linktype='link']",
+
+        ".ipsDataItem_title a",
+
+        "a.ipsDataItem_title",
+
+        "h4.ipsDataItem_title a",
+
+        "article a"
+
+    ]
+
+    for selector in selectors:
+
+        links = soup.select(selector)
+
+        print(f"SELECTOR {selector} -> {len(links)}")
+
+        for link in links:
+
+            href = link.get("href", "")
+
+            title = link.get_text(" ", strip=True)
+
+            if not href:
+                continue
+
+            if "/topic/" not in href:
+                continue
+
+            full_url = urljoin(
+                "https://forums.homecomingservers.com",
+                href
             )
 
-        title = a.get_text(" ", strip=True)
+            slug = href.split("/topic/")[-1]
 
-        topics.append({
-            "title": title,
-            "url": href.split("?")[0]
-        })
+            if slug in seen:
+                continue
 
-    unique = {}
+            seen.add(slug)
 
-    for t in topics:
-        unique[t["url"]] = t
+            topics.append({
+                "title": title,
+                "url": full_url
+            })
 
-    return list(unique.values())
+    return topics
+
+
+def crawl_topics():
+
+    print("============================================================")
+    print("CRAWLING BASE CONSTRUCTION FORUM")
+    print("============================================================")
+
+    html = fetch_page(BASE_FORUM_URL)
+
+    topics = extract_topics_from_page(html)
+
+    print(f"FOUND {len(topics)} TOPICS")
+
+    for t in topics[:10]:
+        print("-", t["title"])
+
+    return topics
