@@ -78,9 +78,9 @@ def discover_topics():
     print("RSS STATUS:", r.status_code)
 
     soup = BeautifulSoup(
-        r.text,
-        "xml"
-    )
+    r.text,
+    "html.parser"
+)
 
     items = soup.find_all("item")
 
