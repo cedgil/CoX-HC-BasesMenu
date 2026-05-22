@@ -3,6 +3,7 @@
 import os
 import re
 import requests
+
 from bs4 import BeautifulSoup
 from datetime import datetime, timezone
 
@@ -13,9 +14,20 @@ from datetime import datetime, timezone
 SUPABASE_URL = os.environ["SUPABASE_URL"].rstrip("/")
 SUPABASE_KEY = os.environ["SUPABASE_KEY"]
 
-SUPABASE_TABLE = "scraped_bases_forum"
+TABLE_NAME = "scraped_bases_forum"
 
 NOW = datetime.now(timezone.utc).isoformat()
+
+# =========================================================
+# FIX REST URL
+# =========================================================
+
+if "/rest/v1" in SUPABASE_URL:
+    REST_BASE_URL = SUPABASE_URL.split("/rest/v1")[0] + "/rest/v1"
+else:
+    REST_BASE_URL = SUPABASE_URL + "/rest/v1"
+
+API_URL = f"{REST_BASE_URL}/{TABLE_NAME}"
 
 # =========================================================
 # SOURCES
@@ -56,25 +68,10 @@ SOURCES = [
 ]
 
 # =========================================================
-# SUPABASE URL FIX
+# SERVER NORMALIZATION
 # =========================================================
 
-if "/rest/v1/" in SUPABASE_URL:
-    REST_BASE_URL = SUPABASE_URL.split("/rest/v1")[0] + "/rest/v1"
-
-elif SUPABASE_URL.endswith("/rest/v1"):
-    REST_BASE_URL = SUPABASE_URL
-
-else:
-    REST_BASE_URL = SUPABASE_URL + "/rest/v1"
-
-API_URL = f"{REST_BASE_URL}/{SUPABASE_TABLE}"
-
-# =========================================================
-# SHARDS
-# =========================================================
-
-SHARD_MAP = {
+SERVER_MAP = {
     "torch": "Torchbearer",
     "torchbearer": "Torchbearer",
 
@@ -86,172 +83,207 @@ SHARD_MAP = {
 
     "reunion": "Reunion",
 
-    "indo": "Indomitable",
+    "indom": "Indomitable",
     "indomitable": "Indomitable",
 
     "victory": "Victory"
 }
 
-VALID_SHARDS = {
-    "Torchbearer",
-    "Excelsior",
-    "Everlasting",
-    "Reunion",
-    "Indomitable",
-    "Victory"
-}
+VALID_SERVERS = set(SERVER_MAP.values())
 
 # =========================================================
 # HEADERS
 # =========================================================
 
 HEADERS = {
-    "apikey": SUPABASE_KEY,
-    "Authorization": f"Bearer {SUPABASE_KEY}",
-    "Content-Type": "application/json"
+    "User-Agent": "Mozilla/5.0"
 }
 
 # =========================================================
 # HELPERS
 # =========================================================
 
-def clean(text):
-    if not text:
-        return ""
+def supabase_headers():
+    return {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json"
+    }
 
-    text = text.replace("\xa0", " ")
-    text = text.replace("\r", "\n")
-    text = re.sub(r"\n+", "\n", text)
-    text = re.sub(r"[ \t]+", " ", text)
+# =========================================================
+# SERVER EXTRACTION
+# =========================================================
 
-    return text.strip()
-
-
-def normalize_shard(value):
+def normalize_server(value):
 
     if not value:
         return None
 
-    value = clean(value).lower()
+    v = value.strip().lower()
 
-    for key, normalized in SHARD_MAP.items():
-        if value == key:
-            return normalized
+    for k, final_name in SERVER_MAP.items():
+        if v == k:
+            return final_name
 
-    for key, normalized in SHARD_MAP.items():
-        if key in value:
-            return normalized
+    for k, final_name in SERVER_MAP.items():
+        if k in v:
+            return final_name
 
     return None
 
+# =========================================================
+# CATEGORY CLEANUP
+# =========================================================
 
-def extract_passcode(text):
+def cleanup_category(value):
 
-    if not text:
+    if not value:
         return None
 
-    m = re.search(
-        r"\b[A-Z0-9]{2,}-\d+\b",
-        text,
-        re.I
-    )
+    value = value.strip()
 
-    if not m:
+    stop_markers = [
+        "Contributing builders",
+        "Any additional information",
+        "Special or Hidden Features",
+        "Is flight or teleportation",
+        "Description",
+        "Edited",
+        "Posted"
+    ]
+
+    for marker in stop_markers:
+        if marker in value:
+            value = value.split(marker)[0].strip()
+
+    value = value.replace("\n", " ").strip()
+
+    value = re.sub(r"\s+", " ", value)
+
+    value = re.sub(r"\b\d+\s*$", "", value).strip()
+
+    mappings = {
+        "Where does this fit? Clubs and Venues": "Clubs and Venues",
+        "Fantasy /": "Fantasy",
+        "Tech /": "Tech",
+        "Sci/Tech,": "Sci/Tech",
+        "Other /": "Other",
+        "Misc?": "Misc",
+        "Free form": "Freeform",
+        "Floating Islands": "Floating Islands"
+    }
+
+    for k, v in mappings.items():
+        if value.startswith(k):
+            return v
+
+    return value
+
+# =========================================================
+# BASE CODE CLEANUP
+# =========================================================
+
+def cleanup_base_code(value):
+
+    if not value:
         return None
 
-    return m.group(0).upper()
+    m = re.search(r"\b[A-Z0-9\-]+-\d+\b", value, re.I)
 
+    if m:
+        return m.group(0).upper()
 
-def extract_single_value(text):
+    return None
 
-    if not text:
-        return None
+# =========================================================
+# FIELD EXTRACTOR
+# =========================================================
 
-    text = clean(text)
-
-    text = text.split("\n")[0]
-
-    text = re.split(
-        r"(Contributing builders|Any additional information|Special or Hidden Features|Is flight|Description|Edited)",
-        text,
-        flags=re.I
-    )[0]
-
-    text = re.sub(r"\s{2,}", " ", text)
-
-    return text.strip(" :-")
-
-
-def extract_field(raw_text, label):
+def extract_field(text, label):
 
     escaped = re.escape(label)
 
-    pattern = rf"""
-        {escaped}
-        \s*
-        (.*?)
-        (?=
-            \n[A-Z][^\n]{{1,80}}:
-            |
-            Edited
-            |
-            Posted
-            |
-            $
-        )
-    """
+    pattern = rf"{escaped}\s*(.+?)(?=\n[A-Z][^\n]{{0,80}}:|\Z)"
 
     m = re.search(
         pattern,
-        raw_text,
-        re.I | re.S | re.X
-    )
-
-    if not m:
-        return None
-
-    return clean(m.group(1))
-
-
-def infer_shard_from_text(text):
-
-    lowered = text.lower()
-
-    for key, shard in SHARD_MAP.items():
-        if key in lowered:
-            return shard
-
-    return None
-
-
-def extract_description(raw_text):
-
-    m = re.search(
-        r"Description\s*:?\s*(.*?)(?=Edited|$)",
-        raw_text,
+        text,
         re.I | re.S
     )
 
     if not m:
         return None
 
-    return clean(m.group(1))
+    value = m.group(1).strip()
 
+    value = re.sub(r"\s+", " ", value)
+
+    return value.strip()
+
+# =========================================================
+# FALLBACK SERVER DETECTION
+# =========================================================
+
+def detect_server_anywhere(text):
+
+    text_lower = text.lower()
+
+    for key, final_name in SERVER_MAP.items():
+        if key in text_lower:
+            return final_name
+
+    return None
+
+# =========================================================
+# DESCRIPTION
+# =========================================================
+
+def extract_description(text):
+
+    patterns = [
+        r"Description\s*:?\s*(.+?)(?:Edited|$)",
+        r"Any additional information.*?:\s*(.+?)(?:Edited|$)"
+    ]
+
+    for pattern in patterns:
+
+        m = re.search(
+            pattern,
+            text,
+            re.I | re.S
+        )
+
+        if m:
+            desc = m.group(1).strip()
+
+            desc = re.sub(r"\s+", " ", desc)
+
+            return desc[:5000]
+
+    return None
+
+# =========================================================
+# DATE
+# =========================================================
 
 def extract_post_date(article):
 
-    time_tag = article.select_one("time")
+    time_tag = article.find("time")
 
     if not time_tag:
         return None
 
-    dt = (
+    value = (
         time_tag.get("datetime")
         or time_tag.get("title")
+        or time_tag.text
     )
 
-    return dt
+    return value
 
+# =========================================================
+# AUTHOR
+# =========================================================
 
 def extract_author(article):
 
@@ -261,69 +293,74 @@ def extract_author(article):
         ".cAuthorPane_author"
     ]
 
-    for selector in selectors:
+    for sel in selectors:
 
-        el = article.select_one(selector)
+        el = article.select_one(sel)
 
         if el:
-            txt = clean(el.get_text())
+            value = el.get_text(" ", strip=True)
 
-            if txt:
-                return txt
+            if value:
+                return value
 
     return None
 
-
-def get_page_number(url):
-
-    m = re.search(r"/page/(\d+)", url)
-
-    if m:
-        return int(m.group(1))
-
-    return 1
-
-
 # =========================================================
-# PARSE POST
+# PAGE COUNT
 # =========================================================
 
-def parse_post(raw_text, fields):
+def detect_last_page(soup):
+
+    pages = []
+
+    for a in soup.select("a"):
+
+        txt = a.get_text(strip=True)
+
+        if txt.isdigit():
+            pages.append(int(txt))
+
+    if not pages:
+        return 1
+
+    return max(pages)
+
+# =========================================================
+# PARSER
+# =========================================================
+
+def parse_post(text, fields):
 
     data = {}
 
     for key, label in fields.items():
 
-        value = extract_field(raw_text, label)
-
-        if not value:
-            continue
-
-        if key == "base_code":
-            value = extract_passcode(value)
-
-        elif key == "category":
-            value = extract_single_value(value)
-
-        elif key == "supergroup_name":
-            value = extract_single_value(value)
-
-        elif key == "shard":
-            value = normalize_shard(value)
+        value = extract_field(text, label)
 
         data[key] = value
 
-    if not data.get("shard"):
-        inferred = infer_shard_from_text(raw_text)
+    if data.get("base_code"):
+        data["base_code"] = cleanup_base_code(
+            data["base_code"]
+        )
 
-        if inferred:
-            data["shard"] = inferred
+    if data.get("category"):
+        data["category"] = cleanup_category(
+            data["category"]
+        )
+
+    if data.get("shard"):
+        data["shard"] = normalize_server(
+            data["shard"]
+        )
+
+    if not data.get("shard"):
+        data["shard"] = detect_server_anywhere(text)
 
     return data
 
-
 # =========================================================
-# DB
+# EXIST CHECK
 # =========================================================
 
 def base_exists(code):
@@ -332,60 +369,58 @@ def base_exists(code):
 
     r = requests.get(
         url,
-        headers=HEADERS,
+        headers=supabase_headers(),
         timeout=30
     )
 
     if r.status_code != 200:
         return False
 
-    try:
-        data = r.json()
-        return len(data) > 0
-    except:
-        return False
+    rows = r.json()
 
+    return len(rows) > 0
 
-def insert_base(data):
+# =========================================================
+# INSERT
+# =========================================================
+
+def insert_base(row):
 
     r = requests.post(
         API_URL,
-        headers=HEADERS,
-        json=data,
-        timeout=30
+        headers=supabase_headers(),
+        json=row,
+        timeout=60
     )
 
-    print("INSERT STATUS:", r.status_code)
+    print(f"INSERT STATUS: {r.status_code}")
 
     if r.text:
-        print("INSERT RESPONSE:", r.text[:500])
+        print(f"INSERT RESPONSE: {r.text[:500]}")
 
     return r.status_code in [200, 201]
 
-
 # =========================================================
-# SCRAPER
+# SCRAPE ONE PAGE
 # =========================================================
 
-def scrape_source(source):
+def scrape_page(source, page):
 
     url = source["url"]
-    fields = source["fields"]
 
-    print("=" * 60)
+    if page > 1:
+        url = f"{url}?page={page}"
+
+    print("============================================================")
     print("SCRAPING")
     print(url)
-    print("=" * 60)
+    print("============================================================")
 
     r = requests.get(
         url,
-        headers={
-            "User-Agent": "Mozilla/5.0"
-        },
-        timeout=30
+        headers=HEADERS,
+        timeout=60
     )
-
-    r.raise_for_status()
 
     soup = BeautifulSoup(r.text, "html.parser")
 
@@ -395,19 +430,19 @@ def scrape_source(source):
 
     inserted = 0
 
-    for idx, article in enumerate(articles, start=1):
+    for article in articles:
 
-        raw_text = clean(article.get_text("\n"))
+        raw_post = article.get_text(
+            "\n",
+            strip=True
+        )
 
-        parsed = parse_post(raw_text, fields)
+        parsed = parse_post(
+            raw_post,
+            source["fields"]
+        )
 
         if not parsed.get("supergroup_name"):
-            continue
-
-        if not parsed.get("shard"):
-            continue
-
-        if parsed["shard"] not in VALID_SHARDS:
             continue
 
         if not parsed.get("base_code"):
@@ -416,7 +451,10 @@ def scrape_source(source):
         if not parsed.get("category"):
             continue
 
-        print("-" * 50)
+        if not parsed.get("shard"):
+            continue
+
+        print("--------------------------------------------------")
         print("PARSED DATA:")
         print(parsed)
 
@@ -424,12 +462,12 @@ def scrape_source(source):
             print("ALREADY EXISTS")
             continue
 
-        topic_slug = url.rstrip("/").split("/")[-1]
+        topic_slug = source["url"].rstrip("/").split("/")[-1]
 
-        payload = {
+        row = {
             "source_topic": topic_slug,
-            "source_url": url,
-            "source_page": get_page_number(url),
+            "source_url": source["url"],
+            "source_page": page,
             "post_author": extract_author(article),
             "post_date": extract_post_date(article),
 
@@ -438,20 +476,21 @@ def scrape_source(source):
             "base_code": parsed["base_code"],
             "category": parsed["category"],
 
-            "description": extract_description(raw_text),
-            "raw_post": raw_text,
+            "description": extract_description(raw_post),
+
+            "raw_post": raw_post,
 
             "scraped_at": NOW
         }
 
         print("----------------------------------------")
         print("BASE FOUND")
-        print(payload["supergroup_name"])
-        print(payload["shard"])
-        print(payload["base_code"])
-        print(payload["category"])
+        print(row["supergroup_name"])
+        print(row["shard"])
+        print(row["base_code"])
+        print(row["category"])
 
-        ok = insert_base(payload)
+        ok = insert_base(row)
 
         if ok:
             inserted += 1
@@ -461,6 +500,46 @@ def scrape_source(source):
 
     return inserted
 
+# =========================================================
+# SCRAPE SOURCE
+# =========================================================
+
+def scrape_source(source):
+
+    first_page = requests.get(
+        source["url"],
+        headers=HEADERS,
+        timeout=60
+    )
+
+    soup = BeautifulSoup(
+        first_page.text,
+        "html.parser"
+    )
+
+    last_page = detect_last_page(soup)
+
+    print("============================================================")
+    print(f"DETECTED {last_page} PAGES")
+    print("============================================================")
+
+    total = 0
+
+    for page in range(1, last_page + 1):
+
+        try:
+            total += scrape_page(
+                source,
+                page
+            )
+
+        except Exception as e:
+
+            print("PAGE ERROR")
+            print(page)
+            print(str(e))
+
+    return total
 
 # =========================================================
 # MAIN
@@ -468,23 +547,29 @@ def scrape_source(source):
 
 def main():
 
-    print("=" * 60)
+    print("============================================================")
     print("SUPABASE DEBUG")
-    print("=" * 60)
+    print("============================================================")
     print(f"API_URL = {API_URL}")
-    print("=" * 60)
+    print("============================================================")
 
     total = 0
 
     for source in SOURCES:
 
-        total += scrape_source(source)
+        try:
 
-    print("=" * 60)
+            total += scrape_source(source)
+
+        except Exception as e:
+
+            print("SOURCE ERROR")
+            print(str(e))
+
+    print("============================================================")
     print("DONE")
     print(f"TOTAL UPSERTED: {total}")
-    print("=" * 60)
-
+    print("============================================================")
 
 # =========================================================
 
