@@ -1,75 +1,89 @@
-from crawler import discover_topics
+from crawler import (
+    discover_topics,
+    discover_topic_pages
+)
 
 from post_scraper import scrape_posts
-
-from parser import parse_post
-
-from supabase import upsert_base
+from parser import extract_bases
+from supabase import (
+    base_exists,
+    insert_base
+)
 
 # =========================================================
-
-def looks_like_base(data):
-
-    return (
-        data["supergroup_name"]
-        and data["shard"]
-        and data["base_code"]
-    )
-
+# MAIN
 # =========================================================
 
 def main():
 
-    topics = discover_topics()
+    print("============================================================")
+    print("HC FORUM BASE CRAWLER")
+    print("============================================================")
 
-    print(f"FOUND {len(topics)} TOPICS")
+    topics = discover_topics()
 
     total = 0
 
     for topic in topics:
 
-        print("=" * 60)
+        print("============================================================")
+        print("TOPIC")
         print(topic["title"])
         print(topic["url"])
-        print("=" * 60)
+        print("============================================================")
 
-        posts = scrape_posts(
+        pages = discover_topic_pages(
             topic["url"]
         )
 
-        for post in posts:
+        for page_num, page_url in enumerate(pages, start=1):
 
-            parsed = parse_post(
-                post["raw_post"]
-            )
+            print("SCRAPING PAGE")
+            print(page_num)
+            print(page_url)
 
-            if not looks_like_base(parsed):
-                continue
+            posts = scrape_posts(page_url)
 
-            payload = {
-                **parsed,
+            print(f"FOUND {len(posts)} POSTS")
 
-                "source_topic": topic["title"],
+            for post in posts:
 
-                "source_url": topic["url"],
+                bases = extract_bases(
+                    post_text=post["raw_post"],
+                    topic_title=topic["title"],
+                    topic_url=topic["url"],
+                    page_number=page_num,
+                    author=post.get("author")
+                )
 
-                "source_page": post["page"],
+                for base in bases:
 
-                "post_author": post["author"],
+                    print(base)
 
-                "raw_post": post["raw_post"]
-            }
+                    if not base.get("base_code"):
+                        continue
 
-            print(payload)
+                    if base_exists(base["base_code"]):
 
-            upsert_base(payload)
+                        print("ALREADY EXISTS")
+                        continue
 
-            total += 1
+                    ok = insert_base(base)
 
-    print("=" * 60)
+                    if ok:
+
+                        total += 1
+
+                        print("INSERTED")
+
+                    else:
+
+                        print("FAILED")
+
+    print("============================================================")
     print("DONE")
-    print("TOTAL:", total)
-    print("=" * 60)
+    print(f"TOTAL: {total}")
+    print("============================================================")
 
 # =========================================================
 
