@@ -3,8 +3,8 @@
 import os
 import re
 import requests
-
 from bs4 import BeautifulSoup
+from datetime import datetime
 
 # =========================================================
 # CONFIG
@@ -13,11 +13,22 @@ from bs4 import BeautifulSoup
 SUPABASE_URL = os.environ["SUPABASE_URL"].rstrip("/")
 SUPABASE_KEY = os.environ["SUPABASE_KEY"]
 
-REST_BASE_URL = (
-    SUPABASE_URL.split("/rest/v1")[0] + "/rest/v1"
-)
+SUPABASE_TABLE = "scraped_bases_forum"
 
-API_URL = f"{REST_BASE_URL}/scraped_bases_forum"
+# =========================================================
+# FIX REST URL
+# =========================================================
+
+if "/rest/v1/" in SUPABASE_URL:
+    REST_BASE_URL = SUPABASE_URL.split("/rest/v1")[0] + "/rest/v1"
+
+elif SUPABASE_URL.endswith("/rest/v1"):
+    REST_BASE_URL = SUPABASE_URL
+
+else:
+    REST_BASE_URL = SUPABASE_URL + "/rest/v1"
+
+API_URL = f"{REST_BASE_URL}/{SUPABASE_TABLE}"
 
 # =========================================================
 # SOURCES
@@ -48,185 +59,174 @@ SOURCES = [
 ]
 
 # =========================================================
+# HEADERS
+# =========================================================
+
+HEADERS = {
+    "User-Agent": "Mozilla/5.0"
+}
+
+SUPABASE_HEADERS = {
+    "apikey": SUPABASE_KEY,
+    "Authorization": f"Bearer {SUPABASE_KEY}",
+    "Content-Type": "application/json"
+}
+
+# =========================================================
 # HELPERS
 # =========================================================
 
-def normalize_text(text):
-
-    text = text.replace("\xa0", " ")
-    text = text.replace("\r", "\n")
-
-    text = re.sub(r"\n+", "\n", text)
-    text = re.sub(r"[ \t]+", " ", text)
-
-    return text.strip()
-
-
-def clean_value(v):
-
-    if not v:
+def clean(text):
+    if not text:
         return ""
-
-    v = normalize_text(v)
-
-    v = re.sub(r"^:+", "", v)
-    v = re.sub(r"\s+", " ", v)
-
-    return v.strip()
+    return re.sub(r"\s+", " ", text).strip()
 
 
-def extract_field(text, label, all_labels):
+def extract_field(text, label):
 
-    try:
+    pattern = rf"{re.escape(label)}\s*(.+?)(?=\s+[A-Z][^:\n]+:|$)"
 
-        start = text.lower().index(label.lower())
+    match = re.search(
+        pattern,
+        text,
+        flags=re.IGNORECASE | re.DOTALL
+    )
 
-    except ValueError:
-        return ""
+    if not match:
+        return None
 
-    start += len(label)
+    value = clean(match.group(1))
 
-    end_positions = []
+    value = re.split(
+        r"(Contributing builders|Any additional information|Special or Hidden Features|Is flight or teleportation useful|Again, please list the TOUR hub)",
+        value,
+        flags=re.IGNORECASE
+    )[0].strip()
 
-    for other_label in all_labels:
+    return value
 
-        if other_label == label:
+
+def parse_post(text, fields):
+
+    data = {}
+
+    for key, label in fields.items():
+        value = extract_field(text, label)
+
+        if value:
+            data[key] = value
+
+    return data
+
+
+def get_post_date(article):
+
+    selectors = [
+        "time",
+        ".ipsType_light",
+        ".cAuthorPane_info"
+    ]
+
+    for selector in selectors:
+
+        el = article.select_one(selector)
+
+        if not el:
             continue
 
-        pos = text.lower().find(
-            other_label.lower(),
-            start
+        value = (
+            el.get("datetime")
+            or el.get_text(" ", strip=True)
         )
 
-        if pos != -1:
-            end_positions.append(pos)
+        if value:
+            return clean(value)
 
-    if end_positions:
-        end = min(end_positions)
-        value = text[start:end]
-    else:
-        value = text[start:]
-
-    value = normalize_text(value)
-
-    # remove edited footer
-    value = re.split(
-        r"Edited\s+[A-Z][a-z]+\s+\d{1,2}",
-        value
-    )[0]
-
-    # remove forum reactions garbage
-    value = re.split(
-        r"\b\d+\s+\d+\s+\d+\b",
-        value
-    )[0]
-
-    return value.strip(" :-")
+    return None
 
 
-def valid_base_code(code):
+def get_post_author(article):
 
-    return bool(
-        re.match(
-            r"^[A-Z0-9]{2,}-\d+$",
-            code.upper()
-        )
-    )
+    selectors = [
+        ".cAuthorPane_author a",
+        ".ipsType_break",
+        ".ipsType_normal a"
+    ]
+
+    for selector in selectors:
+
+        el = article.select_one(selector)
+
+        if not el:
+            continue
+
+        text = el.get_text(" ", strip=True)
+
+        if text:
+            return clean(text)
+
+    return None
+
+
+def get_post_content(article):
+
+    selectors = [
+        ".ipsComment_content",
+        ".cPost_contentWrap",
+        ".ipsType_richText"
+    ]
+
+    for selector in selectors:
+
+        el = article.select_one(selector)
+
+        if el:
+            return clean(
+                el.get_text("\n", strip=True)
+            )
+
+    return ""
+
 
 # =========================================================
 # SUPABASE
 # =========================================================
 
-def headers():
+def base_exists(base_code):
 
-    return {
-        "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
-        "Content-Type": "application/json"
+    url = API_URL
+
+    params = {
+        "base_code": f"eq.{base_code}",
+        "select": "id"
     }
 
-# =========================================================
-# UPSERT
-# =========================================================
-
-def upsert_base(data):
-
-    code = data["base_code"]
-
-    check_url = (
-        f"{API_URL}"
-        f"?base_code=eq.{code}"
-        f"&select=id"
-    )
-
-    check = requests.get(
-        check_url,
-        headers=headers(),
+    r = requests.get(
+        url,
+        headers=SUPABASE_HEADERS,
+        params=params,
         timeout=30
     )
 
-    print(f"CHECK STATUS: {check.status_code}")
+    return r.status_code == 200 and len(r.json()) > 0
 
-    if check.status_code != 200:
-        print("CHECK FAILED")
-        print(check.text)
-        return False
 
-    exists = len(check.json()) > 0
-
-    payload = {
-        "supergroup_name": data["supergroup_name"],
-        "shard": data["shard"],
-        "base_code": data["base_code"],
-        "category": data["category"]
-    }
-
-    # ----------------------------------------
-    # UPDATE
-    # ----------------------------------------
-
-    if exists:
-
-        update_url = (
-            f"{API_URL}"
-            f"?base_code=eq.{code}"
-        )
-
-        r = requests.patch(
-            update_url,
-            headers=headers(),
-            json=payload,
-            timeout=30
-        )
-
-        print(f"UPDATE STATUS: {r.status_code}")
-
-        if r.status_code not in [200, 204]:
-            print(r.text)
-            return False
-
-        print("UPDATED")
-        return True
-
-    # ----------------------------------------
-    # INSERT
-    # ----------------------------------------
+def insert_base(data):
 
     r = requests.post(
         API_URL,
-        headers=headers(),
-        json=payload,
+        headers=SUPABASE_HEADERS,
+        json=data,
         timeout=30
     )
 
-    print(f"INSERT STATUS: {r.status_code}")
+    print("INSERT STATUS:", r.status_code)
 
-    if r.status_code not in [200, 201]:
-        print(r.text)
-        return False
+    if r.text:
+        print("INSERT RESPONSE:", r.text[:500])
 
-    print("INSERTED")
-    return True
+    return r.status_code in [200, 201]
+
 
 # =========================================================
 # SCRAPER
@@ -239,94 +239,84 @@ def scrape_source(source):
     print(source["url"])
     print("============================================================")
 
-    headers_req = {
-        "User-Agent": "Mozilla/5.0"
-    }
-
     r = requests.get(
         source["url"],
-        headers=headers_req,
+        headers=HEADERS,
         timeout=60
     )
 
     soup = BeautifulSoup(r.text, "html.parser")
 
-    selectors = [
-        ".ipsComment_content",
-        ".cPost_contentWrap",
-        ".ipsType_richText",
-        "article"
-    ]
+    articles = soup.select("article")
 
-    raw_posts = []
-
-    for selector in selectors:
-
-        found = soup.select(selector)
-
-        print(f"FOUND {len(found)} POSTS USING {selector}")
-
-        raw_posts.extend(found)
-
-    print(f"TOTAL RAW POSTS: {len(raw_posts)}")
+    print(f"FOUND {len(articles)} ARTICLES")
 
     inserted = 0
 
-    for post in raw_posts:
+    for article in articles:
 
-        text = normalize_text(
-            post.get_text("\n", strip=True)
-        )
+        raw_post = get_post_content(article)
 
-        if not text:
+        if not raw_post:
             continue
 
-        data = {}
+        parsed = parse_post(
+            raw_post,
+            source["fields"]
+        )
 
-        all_labels = list(source["fields"].values())
-
-        for field_name, label in source["fields"].items():
-
-            data[field_name] = clean_value(
-                extract_field(
-                    text,
-                    label,
-                    all_labels
-                )
-            )
+        if (
+            "supergroup_name" not in parsed
+            or "shard" not in parsed
+            or "base_code" not in parsed
+            or "category" not in parsed
+        ):
+            continue
 
         print("--------------------------------------------------")
         print("PARSED DATA:")
-        print(data)
+        print(parsed)
 
-        if not data["supergroup_name"]:
+        if base_exists(parsed["base_code"]):
+            print("ALREADY EXISTS")
             continue
 
-        if not data["shard"]:
-            continue
+        payload = {
+            "supergroup_name": parsed["supergroup_name"],
+            "shard": parsed["shard"],
+            "base_code": parsed["base_code"],
+            "category": parsed["category"],
 
-        if not data["base_code"]:
-            continue
+            "source_topic": source["url"].split("/")[-2],
+            "source_url": source["url"],
+            "source_page": 1,
 
-        if not data["category"]:
-            continue
+            "post_author": get_post_author(article),
+            "post_date": get_post_date(article),
 
-        if not valid_base_code(data["base_code"]):
-            continue
+            "description": raw_post[:5000],
+            "raw_post": raw_post,
+
+            "created_at": datetime.utcnow().isoformat()
+        }
 
         print("----------------------------------------")
         print("BASE FOUND")
-        print(data["supergroup_name"])
-        print(data["shard"])
-        print(data["base_code"])
-        print(data["category"])
+        print(payload["supergroup_name"])
+        print(payload["shard"])
+        print(payload["base_code"])
+        print(payload["category"])
 
-        ok = upsert_base(data)
+        ok = insert_base(payload)
 
         if ok:
             inserted += 1
+            print("INSERTED")
+        else:
+            print("INSERT FAILED")
 
     return inserted
+
 
 # =========================================================
 # MAIN
@@ -343,13 +333,13 @@ def main():
     total = 0
 
     for source in SOURCES:
-
         total += scrape_source(source)
 
     print("============================================================")
     print("DONE")
     print(f"TOTAL UPSERTED: {total}")
     print("============================================================")
+
 
 # =========================================================
 
