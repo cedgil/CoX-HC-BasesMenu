@@ -3,6 +3,7 @@
 import os
 import re
 import requests
+
 from bs4 import BeautifulSoup
 from datetime import datetime, timezone
 
@@ -10,10 +11,8 @@ from datetime import datetime, timezone
 # CONFIG
 # =========================================================
 
-TOPIC_ID = 53862
-
-FORUM_JSON_URL = (
-    f"https://forums.homecomingservers.com/topic/{TOPIC_ID}-2025-base-building-contest/?do=getNewComment"
+FORUM_URL = (
+    "https://forums.homecomingservers.com/topic/65389-2025-base-building-contest/"
 )
 
 SUPABASE_URL = os.environ["SUPABASE_URL"].rstrip("/")
@@ -24,7 +23,7 @@ SUPABASE_TABLE = "scraped_bases_forum"
 NOW = datetime.now(timezone.utc)
 
 # =========================================================
-# REST URL
+# FIX REST URL
 # =========================================================
 
 if "/rest/v1/" in SUPABASE_URL:
@@ -39,10 +38,24 @@ else:
 API_URL = f"{REST_BASE_URL}/{SUPABASE_TABLE}"
 
 # =========================================================
+# DEBUG
+# =========================================================
+
+print("============================================================")
+print("SUPABASE DEBUG")
+print("============================================================")
+print(f"API_URL = {API_URL}")
+print("============================================================")
+
+# =========================================================
 # HEADERS
 # =========================================================
 
 HEADERS = {
+    "User-Agent": "Mozilla/5.0"
+}
+
+SUPABASE_HEADERS = {
     "apikey": SUPABASE_KEY,
     "Authorization": f"Bearer {SUPABASE_KEY}",
     "Content-Type": "application/json",
@@ -50,104 +63,74 @@ HEADERS = {
 }
 
 # =========================================================
-# DEBUG
-# =========================================================
-
-print("============================================================")
-print("SUPABASE DEBUG")
-print("============================================================")
-print("API_URL =", API_URL)
-print("============================================================")
-
-# =========================================================
 # HELPERS
 # =========================================================
 
+VALID_SHARDS = [
+    "Everlasting",
+    "Excelsior",
+    "Torchbearer",
+    "Indomitable",
+    "Victory",
+    "Reunion"
+]
+
+VALID_CATEGORIES = [
+    "Arcane",
+    "Tech",
+    "Roleplay",
+    "RP",
+    "Transit",
+    "Hub",
+    "Misc",
+    "Other",
+    "Realism",
+    "Utilities",
+    "Maze"
+]
+
+# =========================================================
+# CLEAN
+# =========================================================
+
 def clean(text):
-    return re.sub(r"\s+", " ", text or "").strip()
+
+    if not text:
+        return ""
+
+    text = text.replace("\xa0", " ")
+
+    text = re.sub(r"\s+", " ", text)
+
+    return text.strip()
 
 # =========================================================
-# FETCH POSTS
-# =========================================================
-
-def fetch_topic_html():
-
-    headers = {
-        "User-Agent": "Mozilla/5.0"
-    }
-
-    url = (
-        "https://forums.homecomingservers.com/topic/"
-        "53862-2025-base-building-contest/"
-    )
-
-    r = requests.get(
-        url,
-        headers=headers,
-        timeout=30
-    )
-
-    r.raise_for_status()
-
-    return r.text
-
-# =========================================================
-# EXTRACT POSTS
-# =========================================================
-
-def extract_posts(html):
-
-    soup = BeautifulSoup(html, "html.parser")
-
-    posts = []
-
-    #
-    # vrai contenu IPS
-    #
-
-    selectors = [
-        ".ipsComment_content",
-        ".cPost_contentWrap",
-        ".ipsType_richText"
-    ]
-
-    for selector in selectors:
-
-        found = soup.select(selector)
-
-        if found:
-            print(f"FOUND {len(found)} POSTS USING {selector}")
-            posts.extend(found)
-
-    return posts
-
-# =========================================================
-# EXTRACTION
+# EXTRACTORS
 # =========================================================
 
 def extract_base_code(text):
 
     m = re.search(
-        r"\b[A-Z0-9]{2,}-\d+\b",
-        text.upper()
+        r"\b([A-Z0-9]{2,}-\d{3,})\b",
+        text,
+        re.IGNORECASE
     )
 
-    return m.group(0) if m else None
+    if m:
+        return m.group(1).upper()
+
+    return None
 
 
 def extract_shard(text):
 
-    shards = [
-        "Excelsior",
-        "Everlasting",
-        "Torchbearer",
-        "Indomitable",
-        "Victory",
-        "Reunion"
-    ]
+    for shard in VALID_SHARDS:
 
-    for shard in shards:
-        if re.search(rf"\b{shard}\b", text, re.IGNORECASE):
+        if re.search(
+            rf"\b{re.escape(shard)}\b",
+            text,
+            re.IGNORECASE
+        ):
             return shard
 
     return None
@@ -155,21 +138,12 @@ def extract_shard(text):
 
 def extract_category(text):
 
-    patterns = [
-        r"The category your base is entering under:\s*(.+?)(?:Contributing builders|$)",
-        r"Category:\s*(.+)"
-    ]
+    lower = text.lower()
 
-    for p in patterns:
+    for category in VALID_CATEGORIES:
 
-        m = re.search(
-            p,
-            text,
-            re.IGNORECASE
-        )
-
-        if m:
-            return clean(m.group(1))
+        if category.lower() in lower:
+            return category
 
     return None
 
@@ -177,70 +151,61 @@ def extract_category(text):
 def extract_supergroup_name(text):
 
     patterns = [
-        r"Supergroup Name:\s*(.+)",
-        r"SG Name:\s*(.+)",
-        r"Base Name:\s*(.+)"
+
+        r"BASE FOUND\s+(.+?)\s+(Everlasting|Excelsior|Torchbearer|Indomitable|Victory|Reunion)",
+
+        r"Supergroup Name[:\s]+(.+?)(?:Shard|Server|Passcode|Base Code)",
+
+        r"Name[:\s]+(.+?)(?:Shard|Server|Passcode|Base Code)"
     ]
 
-    for p in patterns:
+    for pattern in patterns:
 
         m = re.search(
-            p,
+            pattern,
             text,
-            re.IGNORECASE
+            re.IGNORECASE | re.DOTALL
         )
 
         if m:
-            return clean(m.group(1))
 
-    #
-    # fallback :
-    # première ligne raisonnable
-    #
+            value = clean(m.group(1))
 
-    lines = [
-        clean(l)
-        for l in text.split("\n")
-        if clean(l)
-    ]
-
-    for line in lines:
-
-        if (
-            len(line) < 80
-            and not extract_shard(line)
-            and not extract_base_code(line)
-        ):
-            return line
+            if len(value) > 2:
+                return value
 
     return None
 
 # =========================================================
-# EXISTS
+# SUPABASE
 # =========================================================
 
 def base_exists(base_code):
 
-    url = f"{API_URL}?base_code=eq.{base_code}&select=id"
+    url = API_URL
+
+    params = {
+        "select": "id",
+        "base_code": f"eq.{base_code}",
+        "limit": 1
+    }
 
     r = requests.get(
         url,
-        headers=HEADERS,
+        headers=SUPABASE_HEADERS,
+        params=params,
         timeout=30
     )
 
     if r.status_code != 200:
+        print("CHECK STATUS:", r.status_code)
+        print("CHECK RESPONSE:", r.text)
         return False
 
-    try:
-        data = r.json()
-        return len(data) > 0
-    except:
-        return False
+    data = r.json()
 
-# =========================================================
-# UPSERT
-# =========================================================
+    return len(data) > 0
+
 
 def upsert_entry(entry):
 
@@ -250,63 +215,98 @@ def upsert_entry(entry):
 
     r = requests.post(
         API_URL,
-        headers=HEADERS,
+        headers=SUPABASE_HEADERS,
         params=params,
         json=[entry],
-        timeout=60
+        timeout=30
     )
 
     print("UPSERT STATUS:", r.status_code)
 
     if r.text:
-        print(r.text[:300])
+        print("UPSERT RESPONSE:", r.text[:500])
 
     return r.status_code in [200, 201]
 
 # =========================================================
-# MAIN SCRAPER
+# MAIN
 # =========================================================
 
-def scrape():
+def main():
 
-    html = fetch_topic_html()
+    r = requests.get(
+        FORUM_URL,
+        headers=HEADERS,
+        timeout=60
+    )
 
-    posts = extract_posts(html)
+    r.raise_for_status()
 
-    print("TOTAL RAW POSTS:", len(posts))
+    soup = BeautifulSoup(r.text, "html.parser")
+
+    posts = []
+
+    selectors = [
+        ".ipsComment_content",
+        ".cPost_contentWrap",
+        ".ipsType_richText",
+        "article"
+    ]
+
+    for selector in selectors:
+
+        found = soup.select(selector)
+
+        print(f"FOUND {len(found)} POSTS USING {selector}")
+
+        posts.extend(found)
+
+    print(f"TOTAL RAW POSTS: {len(posts)}")
+    print("============================================================")
 
     inserted = 0
 
-    for post in posts:
+    for idx, post in enumerate(posts):
 
         text = post.get_text("\n", strip=True)
 
+        text = clean(text)
+
+        print("--------------------------------------------------")
+        print(f"POST #{idx + 1}")
+        print("--------------------------------------------------")
+        print(text[:2000])
+        print()
+
         if len(text) < 100:
+            print("TOO SHORT")
             continue
 
         base_code = extract_base_code(text)
-
-        if not base_code:
-            continue
-
         supergroup_name = extract_supergroup_name(text)
         shard = extract_shard(text)
         category = extract_category(text)
 
-        print("----------------------------------------")
-        print("BASE FOUND")
-        print(supergroup_name)
-        print(shard)
-        print(base_code)
-        print(category)
+        print("PARSED:")
+        print("supergroup_name =", supergroup_name)
+        print("shard =", shard)
+        print("base_code =", base_code)
+        print("category =", category)
+
+        if not base_code:
+            print("SKIP: no base code")
+            continue
 
         if not supergroup_name:
+            print("SKIP: no supergroup name")
             continue
 
         if not shard:
+            print("SKIP: no shard")
             continue
 
         if not category:
+            print("SKIP: no category")
             continue
 
         exists = base_exists(base_code)
@@ -331,14 +331,15 @@ def scrape():
 
             inserted += 1
 
+        else:
+            print("INSERT FAILED")
+
     print("============================================================")
     print("DONE")
-    print("TOTAL UPSERTED:", inserted)
+    print(f"TOTAL UPSERTED: {inserted}")
     print("============================================================")
 
-# =========================================================
-# MAIN
 # =========================================================
 
 if __name__ == "__main__":
-    scrape()
+    main()
