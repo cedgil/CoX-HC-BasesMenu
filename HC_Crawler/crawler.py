@@ -2,27 +2,24 @@ import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 import re
-import json
 
 # =========================================================
 # CONFIG
 # =========================================================
 
-BASE_FORUM_URL = (
-    "https://forums.homecomingservers.com/forum/53-base-construction/"
+RSS_URL = (
+    "https://forums.homecomingservers.com/forum/53-base-construction.xml/"
 )
 
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0 Safari/537.36"
+        "Chrome/124 Safari/537.36"
     )
 }
 
 MIN_YEAR = 2021
-
-MAX_FORUM_PAGES = 5
 
 MAX_TOPIC_PAGES = 10
 
@@ -53,10 +50,9 @@ def looks_like_base_topic(title):
         "teleport",
         "teleporter",
         "hub",
-        "sg",
-        "supergroup",
         "venue",
-        "rp"
+        "rp",
+        "supergroup"
     ]
 
     return any(k in t for k in keywords)
@@ -67,107 +63,61 @@ def looks_like_base_topic(title):
 
 def discover_topics():
 
+    print("============================================================")
+    print("DISCOVERING TOPICS FROM RSS")
+    print("============================================================")
+
     found = []
 
-    print("============================================================")
-    print("DISCOVERING TOPICS")
-    print("============================================================")
+    r = requests.get(
+        RSS_URL,
+        headers=HEADERS,
+        timeout=30
+    )
 
-    for page in range(1, MAX_FORUM_PAGES + 1):
+    print("RSS STATUS:", r.status_code)
 
-        if page == 1:
+    soup = BeautifulSoup(
+        r.text,
+        "xml"
+    )
 
-            url = BASE_FORUM_URL
+    items = soup.find_all("item")
 
-        else:
+    print(f"RSS ITEMS: {len(items)}")
 
-            url = BASE_FORUM_URL + f"?page={page}"
+    for item in items:
 
-        print(url)
+        title_tag = item.find("title")
+        link_tag = item.find("link")
 
-        try:
+        if not title_tag or not link_tag:
+            continue
 
-            r = requests.get(
-                url,
-                headers=HEADERS,
-                timeout=30
-            )
+        title = title_tag.text.strip()
+        url = link_tag.text.strip()
 
-            print("STATUS:", r.status_code)
+        if not looks_like_base_topic(title):
+            continue
 
-            html = r.text
+        year = extract_year(title)
 
-            print("HTML SIZE:", len(html))
+        if year and year < MIN_YEAR:
+            continue
 
-            # =====================================================
-            # FALLBACK DEBUG
-            # =====================================================
+        topic = {
+            "title": title,
+            "url": url
+        }
 
-            if "/topic/" not in html:
+        if topic not in found:
 
-                print("NO /topic/ FOUND IN HTML")
-                print(html[:500])
-                continue
+            found.append(topic)
 
-            # =====================================================
-            # RAW REGEX EXTRACTION
-            # =====================================================
-
-            matches = re.findall(
-
-                r'href="([^"]+/topic/\d+[^"]*)".*?>(.*?)<',
-
-                html,
-
-                re.IGNORECASE | re.DOTALL
-            )
-
-            print("RAW MATCHES:", len(matches))
-
-            for href, raw_title in matches:
-
-                title = BeautifulSoup(
-                    raw_title,
-                    "html.parser"
-                ).get_text(" ", strip=True)
-
-                if not title:
-                    continue
-
-                if not looks_like_base_topic(title):
-                    continue
-
-                year = extract_year(title)
-
-                if year and year < MIN_YEAR:
-                    continue
-
-                full_url = urljoin(
-                    "https://forums.homecomingservers.com",
-                    href
-                )
-
-                full_url = full_url.split("#")[0]
-                full_url = full_url.split("?do=")[0]
-
-                topic = {
-                    "title": title,
-                    "url": full_url
-                }
-
-                if topic not in found:
-
-                    found.append(topic)
-
-                    print("FOUND TOPIC")
-                    print(title)
-                    print(full_url)
-                    print()
-
-        except Exception as e:
-
-            print("DISCOVERY ERROR")
-            print(e)
+            print("FOUND TOPIC")
+            print(title)
+            print(url)
+            print()
 
     print("============================================================")
     print(f"FOUND {len(found)} TOPICS")
