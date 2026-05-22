@@ -3,8 +3,8 @@
 import os
 import re
 import requests
+
 from bs4 import BeautifulSoup
-from datetime import datetime
 
 # =========================================================
 # CONFIG
@@ -77,41 +77,66 @@ SUPABASE_HEADERS = {
 # =========================================================
 
 def clean(text):
+
     if not text:
         return ""
+
+    text = text.replace("\u00a0", " ")
+
     return re.sub(r"\s+", " ", text).strip()
 
 
-def extract_field(text, label):
+def normalize_text(text):
 
-    pattern = rf"{re.escape(label)}\s*(.+?)(?=\s+[A-Z][^:\n]+:|$)"
+    text = text.replace("\r", "\n")
+    text = re.sub(r"\n+", "\n", text)
 
-    match = re.search(
-        pattern,
-        text,
-        flags=re.IGNORECASE | re.DOTALL
-    )
+    return text
 
-    if not match:
+
+def extract_between(text, start_label, all_labels):
+
+    start = text.lower().find(start_label.lower())
+
+    if start == -1:
         return None
 
-    value = clean(match.group(1))
+    start += len(start_label)
 
-    value = re.split(
-        r"(Contributing builders|Any additional information|Special or Hidden Features|Is flight or teleportation useful|Again, please list the TOUR hub)",
-        value,
-        flags=re.IGNORECASE
-    )[0].strip()
+    next_positions = []
 
-    return value
+    for label in all_labels:
+
+        if label == start_label:
+            continue
+
+        pos = text.lower().find(label.lower(), start)
+
+        if pos != -1:
+            next_positions.append(pos)
+
+    end = min(next_positions) if next_positions else len(text)
+
+    value = text[start:end]
+
+    value = clean(value)
+
+    return value if value else None
 
 
-def parse_post(text, fields):
+def extract_fields(raw_text, fields):
 
     data = {}
 
+    labels = list(fields.values())
+
     for key, label in fields.items():
-        value = extract_field(text, label)
+
+        value = extract_between(
+            raw_text,
+            label,
+            labels
+        )
 
         if value:
             data[key] = value
@@ -119,53 +144,43 @@ def parse_post(text, fields):
     return data
 
 
-def get_post_date(article):
+def is_valid_entry(data):
 
-    selectors = [
-        "time",
-        ".ipsType_light",
-        ".cAuthorPane_info"
+    required = [
+        "supergroup_name",
+        "shard",
+        "base_code",
+        "category"
     ]
 
-    for selector in selectors:
+    for field in required:
 
-        el = article.select_one(selector)
+        if field not in data:
+            return False
 
-        if not el:
-            continue
+        value = data[field].strip()
 
-        value = (
-            el.get("datetime")
-            or el.get_text(" ", strip=True)
-        )
+        if len(value) < 2:
+            return False
 
-        if value:
-            return clean(value)
+    if data["supergroup_name"] in [
+        "Shard/Server:",
+        "Your",
+        "The"
+    ]:
+        return False
 
-    return None
+    if data["base_code"] in [
+        "Base",
+        "Code",
+        "The"
+    ]:
+        return False
 
+    if not re.search(r"-\d+", data["base_code"]):
+        return False
 
-def get_post_author(article):
-
-    selectors = [
-        ".cAuthorPane_author a",
-        ".ipsType_break",
-        ".ipsType_normal a"
-    ]
-
-    for selector in selectors:
-
-        el = article.select_one(selector)
-
-        if not el:
-            continue
-
-        text = el.get_text(" ", strip=True)
-
-        if text:
-            return clean(text)
-
-    return None
+    return True
 
 
 def get_post_content(article):
@@ -181,20 +196,51 @@ def get_post_content(article):
         el = article.select_one(selector)
 
         if el:
-            return clean(
-                el.get_text("\n", strip=True)
-            )
+
+            text = el.get_text("\n", strip=True)
+
+            if text:
+                return normalize_text(text)
 
     return ""
 
 
-# =========================================================
-# SUPABASE
-# =========================================================
+def get_post_author(article):
+
+    selectors = [
+        ".cAuthorPane_author",
+        ".ipsType_break"
+    ]
+
+    for selector in selectors:
+
+        el = article.select_one(selector)
+
+        if el:
+
+            text = clean(el.get_text())
+
+            if text:
+                return text
+
+    return None
+
+
+def get_post_date(article):
+
+    time_el = article.select_one("time")
+
+    if time_el:
+
+        return (
+            time_el.get("datetime")
+            or clean(time_el.get_text())
+        )
+
+    return None
+
 
 def base_exists(base_code):
-
-    url = API_URL
 
     params = {
         "base_code": f"eq.{base_code}",
@@ -202,28 +248,34 @@ def base_exists(base_code):
     }
 
     r = requests.get(
-        url,
+        API_URL,
         headers=SUPABASE_HEADERS,
         params=params,
         timeout=30
     )
 
-    return r.status_code == 200 and len(r.json()) > 0
+    if r.status_code != 200:
+        return False
+
+    try:
+        return len(r.json()) > 0
+    except:
+        return False
 
 
-def insert_base(data):
+def insert_base(payload):
 
     r = requests.post(
         API_URL,
         headers=SUPABASE_HEADERS,
-        json=data,
+        json=payload,
         timeout=30
     )
 
     print("INSERT STATUS:", r.status_code)
 
     if r.text:
-        print("INSERT RESPONSE:", r.text[:500])
+        print(r.text[:500])
 
     return r.status_code in [200, 201]
 
@@ -260,17 +312,12 @@ def scrape_source(source):
         if not raw_post:
             continue
 
-        parsed = parse_post(
+        parsed = extract_fields(
             raw_post,
             source["fields"]
         )
 
-        if (
-            "supergroup_name" not in parsed
-            or "shard" not in parsed
-            or "base_code" not in parsed
-            or "category" not in parsed
-        ):
+        if not is_valid_entry(parsed):
             continue
 
         print("--------------------------------------------------")
@@ -282,22 +329,29 @@ def scrape_source(source):
             continue
 
         payload = {
+
             "supergroup_name": parsed["supergroup_name"],
+
             "shard": parsed["shard"],
+
             "base_code": parsed["base_code"],
+
             "category": parsed["category"],
 
             "source_topic": source["url"].split("/")[-2],
+
             "source_url": source["url"],
+
             "source_page": 1,
 
             "post_author": get_post_author(article),
+
             "post_date": get_post_date(article),
 
-            "description": raw_post[:5000],
-            "raw_post": raw_post,
+            "description": raw_post[:4000],
 
-            "created_at": datetime.utcnow().isoformat()
+            "raw_post": raw_post
+
         }
 
         print("----------------------------------------")
@@ -333,6 +387,7 @@ def main():
     total = 0
 
     for source in SOURCES:
+
         total += scrape_source(source)
 
     print("============================================================")
