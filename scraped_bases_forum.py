@@ -3,7 +3,6 @@
 import os
 import re
 import requests
-
 from bs4 import BeautifulSoup
 
 # =========================================================
@@ -16,7 +15,7 @@ SUPABASE_KEY = os.environ["SUPABASE_KEY"]
 SUPABASE_TABLE = "scraped_bases_forum"
 
 # =========================================================
-# FIX SUPABASE URL
+# FIX REST URL
 # =========================================================
 
 if "/rest/v1" in SUPABASE_URL:
@@ -62,180 +61,105 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0"
 }
 
+# =========================================================
+# SUPABASE HEADERS
+# =========================================================
+
 SUPABASE_HEADERS = {
     "apikey": SUPABASE_KEY,
     "Authorization": f"Bearer {SUPABASE_KEY}",
-    "Content-Type": "application/json",
-    "Prefer": "resolution=merge-duplicates"
+    "Content-Type": "application/json"
 }
 
 # =========================================================
 # HELPERS
 # =========================================================
 
-def clean(text):
-
-    if not text:
+def clean(value):
+    if not value:
         return ""
+    return " ".join(value.strip().split())
 
-    text = text.replace("\u00a0", " ")
-
-    text = re.sub(r"\s+", " ", text)
-
-    return text.strip()
-
-# =========================================================
-# FIELD EXTRACTION
-# =========================================================
 
 def extract_field(text, label):
 
-    idx = text.lower().find(label.lower())
+    pattern = rf"{re.escape(label)}\s*(.+?)(?=\n[A-Z][^\n:]+:|\Z)"
 
-    if idx == -1:
-        return ""
-
-    start = idx + len(label)
-
-    chunk = text[start:start + 1500]
-
-    stop_patterns = [
-
-        "supergroup name:",
-        "shard/server:",
-        "base code:",
-        "category to list base in:",
-
-        "your base’s name:",
-        "the shard it is located on:",
-        "the passcode for entry:",
-        "the category your base is entering under:",
-
-        "contributing builders",
-        "additional information",
-        "edited "
-    ]
-
-    lower_chunk = chunk.lower()
-
-    stop_positions = []
-
-    for p in stop_patterns:
-
-        pos = lower_chunk.find(p)
-
-        if pos > 0:
-            stop_positions.append(pos)
-
-    if stop_positions:
-        chunk = chunk[:min(stop_positions)]
-
-    value = clean(chunk)
-
-    value = value.replace("|", " ")
-
-    value = re.sub(r"\s+", " ", value)
-
-    return value.strip()
-
-# =========================================================
-# NORMALIZATION
-# =========================================================
-
-def normalize_code(code):
-
-    if not code:
-        return ""
-
-    code = code.upper().strip()
-
-    m = re.search(
-        r"[A-Z0-9]{2,}-\d+",
-        code
+    match = re.search(
+        pattern,
+        text,
+        flags=re.IGNORECASE | re.DOTALL
     )
 
-    if not m:
+    if not match:
         return ""
 
-    return m.group(0)
+    return clean(match.group(1))
+
+
+def is_valid_base_code(code):
+
+    return bool(
+        re.match(r"^[A-Z0-9]+-\d+$", code.upper())
+    )
 
 # =========================================================
-# VALIDATION
-# =========================================================
-
-def valid_base(data):
-
-    required = [
-        "supergroup_name",
-        "shard",
-        "base_code",
-        "category"
-    ]
-
-    for field in required:
-
-        if not data.get(field):
-            return False
-
-    return True
-
-# =========================================================
-# SUPABASE
+# CHECK EXISTING
 # =========================================================
 
 def base_exists(base_code):
 
-    params = {
-        "base_code": f"eq.{base_code}",
-        "select": "id"
-    }
+    url = f"{API_URL}?base_code=eq.{base_code}"
 
-    r = requests.get(
-        API_URL,
+    response = requests.get(
+        url,
         headers=SUPABASE_HEADERS,
-        params=params,
         timeout=30
     )
 
-    print("CHECK STATUS:", r.status_code)
+    print("CHECK STATUS:", response.status_code)
 
-    if r.status_code >= 400:
-        print("CHECK RESPONSE:", r.text)
+    if response.status_code != 200:
+        print("CHECK RESPONSE:", response.text)
         return False
 
-    try:
+    data = response.json()
 
-        data = r.json()
-
-        return len(data) > 0
-
-    except:
-        return False
+    return len(data) > 0
 
 # =========================================================
-# UPSERT
+# INSERT
 # =========================================================
 
-def upsert_base(data):
+def insert_base(payload):
 
-    params = {
-        "on_conflict": "base_code"
-    }
-
-    r = requests.post(
+    response = requests.post(
         API_URL,
         headers=SUPABASE_HEADERS,
-        params=params,
-        json=[data],
-        timeout=60
+        json=payload,
+        timeout=30
     )
 
-    print("UPSERT STATUS:", r.status_code)
+    print("INSERT STATUS:", response.status_code)
 
-    if r.text:
-        print("UPSERT RESPONSE:", r.text[:500])
+    if response.status_code >= 300:
+        print("INSERT RESPONSE:", response.text)
+        return False
 
-    return r.status_code < 300
+    return True
+
+# =========================================================
+# PARSE POST
+# =========================================================
+
+def parse_post(text, fields):
+
+    parsed = {}
+
+    for key, label in fields.items():
+        parsed[key] = extract_field(text, label)
+
+    return parsed
 
 # =========================================================
 # SCRAPER
@@ -243,24 +167,20 @@ def upsert_base(data):
 
 def scrape_source(source):
 
-    url = source["url"]
-
-    fields = source["fields"]
-
     print("============================================================")
     print("SCRAPING")
-    print(url)
+    print(source["url"])
     print("============================================================")
 
-    r = requests.get(
-        url,
+    response = requests.get(
+        source["url"],
         headers=HEADERS,
         timeout=60
     )
 
-    r.raise_for_status()
+    response.raise_for_status()
 
-    soup = BeautifulSoup(r.text, "html.parser")
+    soup = BeautifulSoup(response.text, "html.parser")
 
     selectors = [
         ".ipsComment_content",
@@ -269,91 +189,76 @@ def scrape_source(source):
         "article"
     ]
 
-    posts = []
+    raw_posts = []
 
     for selector in selectors:
 
-        found = soup.select(selector)
+        posts = soup.select(selector)
 
-        print(f"FOUND {len(found)} POSTS USING {selector}")
+        print(f"FOUND {len(posts)} POSTS USING {selector}")
 
-        posts.extend(found)
+        for post in posts:
 
-    # =====================================================
-    # DEDUPE
-    # =====================================================
+            text = clean(
+                post.get_text("\n", strip=True)
+            )
 
-    unique_posts = []
+            if len(text) > 100:
+                raw_posts.append(text)
 
-    seen = set()
-
-    for post in posts:
-
-        text = clean(
-            post.get_text("\n", strip=True)
-        )
-
-        if not text:
-            continue
-
-        if text in seen:
-            continue
-
-        seen.add(text)
-
-        unique_posts.append(text)
-
-    print(f"TOTAL RAW POSTS: {len(unique_posts)}")
+    print(f"TOTAL RAW POSTS: {len(raw_posts)}")
 
     inserted = 0
 
-    # =====================================================
-    # PARSE
-    # =====================================================
+    for text in raw_posts:
 
-    for text in unique_posts:
-
-        data = {}
-
-        for key, label in fields.items():
-
-            value = extract_field(
-                text,
-                label
-            )
-
-            data[key] = value
-
-        data["base_code"] = normalize_code(
-            data.get("base_code", "")
+        parsed = parse_post(
+            text,
+            source["fields"]
         )
+
+        if not parsed.get("supergroup_name"):
+            continue
+
+        if not parsed.get("shard"):
+            continue
+
+        if not parsed.get("base_code"):
+            continue
+
+        if not parsed.get("category"):
+            continue
+
+        parsed["base_code"] = parsed["base_code"].upper()
+
+        if not is_valid_base_code(parsed["base_code"]):
+            continue
 
         print("--------------------------------------------------")
         print("PARSED DATA:")
-        print(data)
-
-        if not valid_base(data):
-            print("INVALID ENTRY")
-            continue
+        print(parsed)
 
         print("----------------------------------------")
         print("BASE FOUND")
-        print(data["supergroup_name"])
-        print(data["shard"])
-        print(data["base_code"])
-        print(data["category"])
+        print(parsed["supergroup_name"])
+        print(parsed["shard"])
+        print(parsed["base_code"])
+        print(parsed["category"])
 
-        exists = base_exists(
-            data["base_code"]
-        )
-
-        if exists:
+        if base_exists(parsed["base_code"]):
             print("ALREADY EXISTS")
             continue
 
-        ok = upsert_base(data)
+        payload = {
+            "supergroup_name": parsed["supergroup_name"],
+            "shard": parsed["shard"],
+            "base_code": parsed["base_code"],
+            "category": parsed["category"]
+        }
 
-        if ok:
+        success = insert_base(payload)
+
+        if success:
             print("INSERTED")
             inserted += 1
         else:
@@ -376,23 +281,11 @@ def main():
     total = 0
 
     for source in SOURCES:
-
-        try:
-
-            inserted = scrape_source(source)
-
-            total += inserted
-
-        except Exception as e:
-
-            print("============================================================")
-            print("ERROR")
-            print("============================================================")
-            print(e)
+        total += scrape_source(source)
 
     print("============================================================")
     print("DONE")
-    print("TOTAL UPSERTED:", total)
+    print(f"TOTAL UPSERTED: {total}")
     print("============================================================")
 
 # =========================================================
