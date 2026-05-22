@@ -45,7 +45,15 @@ SOURCES = [
             "category": "Category to list base in:"
         }
     },
-
+    {
+        "url": "https://forums.homecomingservers.com/topic/39881-2023-homecoming-base-contest-rules-entries-thread/",
+        "fields": {
+            "supergroup_name": "Base or SG Name:",
+            "shard": "Shard:",
+            "base_code": "Passcode:",
+            "category": "Category for Contest:"
+        }
+    },
     {
         "url": "https://forums.homecomingservers.com/topic/56486-2025-homecoming-base-contest-rules-entries-thread/",
         "fields": {
