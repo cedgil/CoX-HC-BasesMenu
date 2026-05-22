@@ -176,62 +176,76 @@ def get_posts(soup):
     return posts
 
 
-# ============================================================
+# =========================================================
 # SUPABASE
-# ============================================================
+# =========================================================
 
-def base_exists(base_code, shard):
+import os
+import requests
 
-    params = {
-        "base_code": f"eq.{base_code}",
-        "shard": f"eq.{shard}",
-        "select": "id"
+SUPABASE_URL = os.environ["SUPABASE_URL"].rstrip("/")
+SUPABASE_KEY = os.environ["SUPABASE_KEY"]
+
+# IMPORTANT :
+# Ta variable SUPABASE_URL contient DEJA
+# l'URL REST complète de la table.
+#
+# Exemple :
+# https://xxxxx.supabase.co/rest/v1/scraped_bases_forum
+
+API_URL = SUPABASE_URL
+
+def supabase_headers():
+    return {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "resolution=merge-duplicates"
     }
 
-    r = requests.get(
-        API_URL,
-        headers=HEADERS,
-        params=params
-    )
+def upsert_base(base_data):
+    try:
+        check_url = (
+            f"{API_URL}"
+            f"?base_code=eq.{base_data['base_code']}"
+            f"&select=id"
+        )
 
-    print("CHECK STATUS:", r.status_code)
+        check = requests.get(
+            check_url,
+            headers=supabase_headers(),
+            timeout=30
+        )
 
-    if r.status_code != 200:
+        print(f"CHECK STATUS: {check.status_code}")
 
-        print("CHECK RESPONSE:", r.text)
+        if check.text:
+            print(f"CHECK RESPONSE: {check.text[:300]}")
 
+        url = f"{API_URL}?on_conflict=base_code"
+
+        r = requests.post(
+            url,
+            headers=supabase_headers(),
+            json=base_data,
+            timeout=30
+        )
+
+        print(f"UPSERT STATUS: {r.status_code}")
+
+        if r.text:
+            print(f"UPSERT RESPONSE: {r.text[:300]}")
+
+        if r.status_code in [200, 201]:
+            print("INSERTED")
+            return True
+
+        print("INSERT FAILED")
         return False
 
-    data = r.json()
-
-    return len(data) > 0
-
-
-def insert_base(data):
-
-    payload = {
-        "supergroup_name": data["supergroup_name"],
-        "shard": data["shard"],
-        "base_code": data["base_code"],
-        "category": data["category"],
-        "source_url": data["source_url"]
-    }
-
-    r = requests.post(
-        API_URL,
-        headers=HEADERS,
-        json=payload
-    )
-
-    print("UPSERT STATUS:", r.status_code)
-    print("UPSERT RESPONSE:", r.text)
-
-    if r.status_code in [200, 201]:
-        print("INSERTED")
-        return True
-
-    print("INSERT FAILED")
-    return False
+    except Exception as e:
+        print(f"SUPABASE ERROR: {e}")
+        return False
 
 
 # ============================================================
