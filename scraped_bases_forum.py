@@ -16,24 +16,7 @@ SUPABASE_KEY = os.environ["SUPABASE_KEY"]
 
 SUPABASE_TABLE = "scraped_bases_forum"
 
-HEADERS = {
-    "User-Agent": "HC-Base-Scraper/5.0"
-}
-
-NOW = datetime.now(timezone.utc).isoformat()
-
-MAX_PAGES = 10
-
-# =========================================================
-# FIX SUPABASE URL
-# =========================================================
-
-if "/rest/v1" in SUPABASE_URL:
-    REST_BASE_URL = SUPABASE_URL.split("/rest/v1")[0] + "/rest/v1"
-else:
-    REST_BASE_URL = SUPABASE_URL + "/rest/v1"
-
-API_URL = f"{REST_BASE_URL}/{SUPABASE_TABLE}"
+NOW = datetime.now(timezone.utc)
 
 # =========================================================
 # SOURCES
@@ -77,7 +60,7 @@ SOURCES = [
 # SERVERS
 # =========================================================
 
-SERVER_ALIASES = {
+SERVER_MAP = {
     "torch": "Torchbearer",
     "torchbearer": "Torchbearer",
 
@@ -89,20 +72,32 @@ SERVER_ALIASES = {
 
     "reunion": "Reunion",
 
-    "indo": "Indomitable",
+    "indom": "Indomitable",
     "indomitable": "Indomitable",
 
     "victory": "Victory"
 }
 
-VALID_SERVERS = [
-    "Torchbearer",
-    "Excelsior",
-    "Everlasting",
-    "Reunion",
-    "Indomitable",
-    "Victory"
-]
+# =========================================================
+# SUPABASE
+# =========================================================
+
+if "/rest/v1/" in SUPABASE_URL:
+    REST_BASE_URL = SUPABASE_URL.split("/rest/v1")[0] + "/rest/v1"
+
+elif SUPABASE_URL.endswith("/rest/v1"):
+    REST_BASE_URL = SUPABASE_URL
+
+else:
+    REST_BASE_URL = SUPABASE_URL + "/rest/v1"
+
+API_URL = f"{REST_BASE_URL}/{SUPABASE_TABLE}"
+
+print("============================================================")
+print("SUPABASE DEBUG")
+print("============================================================")
+print(f"API_URL = {API_URL}")
+print("============================================================")
 
 # =========================================================
 # HELPERS
@@ -113,63 +108,144 @@ def clean(text):
     if not text:
         return ""
 
-    text = text.replace("\xa0", " ")
+    text = text.replace("\u00a0", " ")
+    text = re.sub(r"\s+", " ", text)
 
-    return re.sub(r"\s+", " ", text).strip()
-
-
-def normalize_server(server):
-
-    server = clean(server).lower()
-
-    for key, value in SERVER_ALIASES.items():
-
-        if key == server:
-            return value
-
-    return server.title()
+    return text.strip()
 
 
-def extract_topic_slug(url):
+def clean_multiline(text):
 
-    m = re.search(r"/topic/\d+-([^/]+)/?", url)
+    if not text:
+        return ""
 
-    if m:
-        return m.group(1)
+    text = text.replace("\u00a0", " ")
+    text = text.replace("\r", "\n")
 
-    return "unknown-topic"
+    lines = []
+
+    for line in text.split("\n"):
+
+        line = line.strip()
+
+        if line:
+            lines.append(line)
+
+    return "\n".join(lines).strip()
 
 
-def extract_page(url):
+def normalize_server(value):
 
-    m = re.search(r"[?&]page=(\d+)", url)
+    if not value:
+        return None
 
-    if m:
-        return int(m.group(1))
+    value = clean(value).lower()
 
-    return 1
+    for key, normalized in SERVER_MAP.items():
+
+        if value == key:
+            return normalized
+
+    for key, normalized in SERVER_MAP.items():
+
+        if key in value:
+            return normalized
+
+    return value.title()
 
 
-def extract_author(article):
+def extract_server_from_text(text):
 
-    selectors = [
-        ".ipsType_break",
-        ".cAuthorPane_author strong",
-        ".ipsType_sectionHead a"
-    ]
+    lower = text.lower()
 
-    for sel in selectors:
+    for key, normalized in SERVER_MAP.items():
 
-        el = article.select_one(sel)
+        if f"all on {key}" in lower:
+            return normalized
 
-        if el:
-
-            txt = clean(el.get_text())
-
-            if txt:
-                return txt
+        if f"on {key}" in lower:
+            return normalized
 
     return None
+
+
+def sanitize_category(category):
+
+    if not category:
+        return None
+
+    category = clean(category)
+
+    STOP_WORDS = [
+        "Contributing builders",
+        "Any additional information",
+        "Special or Hidden Features",
+        "Is flight or teleportation",
+        "Description",
+        "Edited",
+        "Posted"
+    ]
+
+    for stop in STOP_WORDS:
+
+        idx = category.find(stop)
+
+        if idx > 0:
+            category = category[:idx].strip()
+
+    category = re.sub(r"\s+\d+$", "", category)
+
+    category = category.replace("Fantasy /", "Fantasy")
+    category = category.replace("Tech /", "Tech")
+    category = category.replace("Other /", "Other")
+
+    if category.lower().startswith("where does this fit?"):
+        category = category.split("?")[-1].strip()
+
+    return clean(category)
+
+
+def extract_field(raw_text, label):
+
+    pattern = (
+        re.escape(label)
+        + r"\s*(.*?)"
+        + r"(?=\n[A-Z][^\n]{1,80}:|\Z)"
+    )
+
+    match = re.search(
+        pattern,
+        raw_text,
+        re.IGNORECASE | re.DOTALL
+    )
+
+    if not match:
+        return None
+
+    value = clean(match.group(1))
+
+    value = value.split("\n")[0].strip()
+
+    return value
+
+
+def extract_description(raw_text):
+
+    match = re.search(
+        r"Description\s*:?\s*(.*?)(?=Edited|$)",
+        raw_text,
+        re.IGNORECASE | re.DOTALL
+    )
+
+    if not match:
+        return None
+
+    desc = clean(match.group(1))
+
+    if not desc:
+        return None
+
+    return desc
 
 
 def extract_post_date(article):
@@ -182,184 +258,70 @@ def extract_post_date(article):
     value = (
         time_el.get("datetime")
         or time_el.get("title")
-        or clean(time_el.get_text())
     )
+
+    if not value:
+        return None
 
     return value
 
 
-def normalize_category(cat):
+def extract_author(article):
 
-    cat = clean(cat)
+    candidates = [
+        ".ipsType_break",
+        ".cAuthorPane_author",
+        ".ipsComment_author"
+    ]
 
-    cat = re.split(
-        r"(Contributing builders|Any additional information|Edited)",
-        cat,
-        flags=re.I
-    )[0]
+    for selector in candidates:
 
-    cat = re.split(
-        r"(Special or Hidden Features|Is flight or teleportation useful)",
-        cat,
-        flags=re.I
-    )[0]
+        el = article.select_one(selector)
 
-    cat = cat.strip()
+        if el:
+            value = clean(el.get_text(" ", strip=True))
 
-    mappings = {
-        "clubs and venues": "Clubs and Venues",
-        "clubs & venues": "Clubs and Venues",
-        "free form": "Freeform",
-        "freeform": "Freeform",
-        "misc/other": "Misc",
-        "misc": "Misc",
-        "novice": "Novice",
-        "realism": "Realism",
-        "fantasy": "Fantasy",
-        "sci/tech": "Sci/Tech",
-        "sci-tech": "Sci/Tech"
-    }
+            if value:
+                return value
 
-    low = cat.lower()
-
-    for k, v in mappings.items():
-
-        if low.startswith(k):
-            return v
-
-    return cat
+    return None
 
 
-def extract_server_from_text(text):
+def get_total_pages(soup):
 
-    low = text.lower()
+    links = soup.select("a[href*='page=']")
 
-    for alias, real in SERVER_ALIASES.items():
+    max_page = 1
 
-        if alias in low:
-            return real
+    for link in links:
 
-    return ""
+        href = link.get("href", "")
 
+        m = re.search(r"page=(\d+)", href)
+
+        if m:
+            page = int(m.group(1))
+
+            if page > max_page:
+                max_page = page
+
+    return max_page
+
+
+def get_page_url(base_url, page):
+
+    if page <= 1:
+        return base_url
+
+    separator = "&" if "?" in base_url else "?"
+
+    return f"{base_url}{separator}page={page}"
 
 # =========================================================
-# FIELD EXTRACTION
+# SUPABASE REQUESTS
 # =========================================================
 
-def extract_field(text, label):
-
-    pattern = rf"{re.escape(label)}\s*(.+?)(?=\n[A-Z][^:\n]+:|\Z)"
-
-    m = re.search(
-        pattern,
-        text,
-        flags=re.I | re.S
-    )
-
-    if not m:
-        return ""
-
-    value = clean(m.group(1))
-
-    value = re.split(
-        r"(Edited\s+[A-Z][a-z]+|\d+\s*$)",
-        value,
-        flags=re.I
-    )[0]
-
-    return clean(value)
-
-
-def extract_base_code(value):
-
-    m = re.search(
-        r"\b[A-Z0-9]{2,}-\d+\b",
-        value,
-        flags=re.I
-    )
-
-    if m:
-        return m.group(0).upper()
-
-    return ""
-
-
-# =========================================================
-# PARSER
-# =========================================================
-
-def parse_article(article, source, source_url):
-
-    text = article.get_text("\n", strip=True)
-
-    text = clean(text)
-
-    fields = source["fields"]
-
-    supergroup_name = extract_field(
-        text,
-        fields["supergroup_name"]
-    )
-
-    shard = extract_field(
-        text,
-        fields["shard"]
-    )
-
-    base_code = extract_field(
-        text,
-        fields["base_code"]
-    )
-
-    category = extract_field(
-        text,
-        fields["category"]
-    )
-
-    if not shard:
-        shard = extract_server_from_text(text)
-
-    shard = normalize_server(shard)
-
-    base_code = extract_base_code(base_code)
-
-    category = normalize_category(category)
-
-    if shard not in VALID_SERVERS:
-        return None
-
-    if not supergroup_name:
-        return None
-
-    if not base_code:
-        return None
-
-    data = {
-        "source_topic": extract_topic_slug(source_url),
-        "source_url": source_url,
-        "source_page": extract_page(source_url),
-        "post_author": extract_author(article),
-        "post_date": extract_post_date(article),
-        "supergroup_name": supergroup_name,
-        "shard": shard,
-        "base_code": base_code,
-        "category": category,
-        "description": None,
-        "raw_post": text,
-        "scraped_at": NOW
-    }
-
-    print("--------------------------------------------------")
-    print("PARSED DATA:")
-    print(data)
-
-    return data
-
-# =========================================================
-# SUPABASE
-# =========================================================
-
-def supabase_headers():
+def headers():
 
     return {
         "apikey": SUPABASE_KEY,
@@ -368,120 +330,222 @@ def supabase_headers():
     }
 
 
+def base_exists(code):
+
+    url = API_URL
+
+    params = {
+        "select": "id",
+        "base_code": f"eq.{code}",
+        "limit": 1
+    }
+
+    r = requests.get(
+        url,
+        headers=headers(),
+        params=params,
+        timeout=30
+    )
+
+    if r.status_code != 200:
+        return False
+
+    data = r.json()
+
+    return len(data) > 0
+
+
 def insert_base(data):
+
+    payload = {
+        "source_topic": data["source_topic"],
+        "source_url": data["source_url"],
+        "source_page": data["source_page"],
+        "post_author": data["post_author"],
+        "post_date": data["post_date"],
+        "supergroup_name": data["supergroup_name"],
+        "shard": data["shard"],
+        "base_code": data["base_code"],
+        "category": data["category"],
+        "description": data["description"],
+        "raw_post": data["raw_post"],
+        "scraped_at": NOW.isoformat()
+    }
 
     r = requests.post(
         API_URL,
-        headers=supabase_headers(),
-        json=data,
-        timeout=60
+        headers=headers(),
+        json=payload,
+        timeout=30
     )
 
-    print("INSERT STATUS:", r.status_code)
+    print(f"INSERT STATUS: {r.status_code}")
 
-    if r.text:
-        print("INSERT RESPONSE:", r.text[:500])
+    if r.status_code >= 400:
+        print(f"INSERT RESPONSE: {r.text}")
+        return False
 
-    return r.status_code in [200, 201]
-
+    return True
 
 # =========================================================
 # SCRAPER
 # =========================================================
 
-def scrape_topic(source):
+TOTAL_UPSERTED = 0
 
-    base_url = source["url"]
 
-    visited_pages = set()
+def scrape_source(source):
 
-    all_entries = []
+    global TOTAL_UPSERTED
 
-    page = 1
+    topic_url = source["url"]
 
-    while True:
+    print("============================================================")
+    print("SCRAPING")
+    print(topic_url)
+    print("============================================================")
 
-        if page > MAX_PAGES:
-            print("MAX PAGES REACHED")
-            break
+    r = requests.get(
+        topic_url,
+        headers={
+            "User-Agent": "Mozilla/5.0"
+        },
+        timeout=60
+    )
 
-        if page == 1:
-            url = base_url
-        else:
-            url = f"{base_url}?page={page}"
+    r.raise_for_status()
 
-        if url in visited_pages:
-            break
+    soup = BeautifulSoup(r.text, "html.parser")
 
-        visited_pages.add(url)
+    total_pages = get_total_pages(soup)
 
-        print("============================================================")
-        print("SCRAPING")
-        print(url)
-        print("============================================================")
+    print(f"TOTAL PAGES: {total_pages}")
 
-        try:
+    for page in range(1, total_pages + 1):
 
-            resp = requests.get(
-                url,
-                headers=HEADERS,
-                timeout=30
+        page_url = get_page_url(topic_url, page)
+
+        print("--------------------------------------------------")
+        print(f"PAGE {page}")
+        print(page_url)
+        print("--------------------------------------------------")
+
+        r = requests.get(
+            page_url,
+            headers={
+                "User-Agent": "Mozilla/5.0"
+            },
+            timeout=60
+        )
+
+        r.raise_for_status()
+
+        soup = BeautifulSoup(r.text, "html.parser")
+
+        articles = soup.select("article")
+
+        print(f"FOUND {len(articles)} ARTICLES")
+
+        for article in articles:
+
+            raw_post = clean_multiline(
+                article.get_text("\n", strip=True)
             )
 
-            if resp.status_code != 200:
-                break
+            if not raw_post:
+                continue
 
-            soup = BeautifulSoup(resp.text, "html.parser")
+            parsed = {}
 
-            articles = soup.select("article")
+            for key, label in source["fields"].items():
 
-            print(f"FOUND {len(articles)} ARTICLES")
+                value = extract_field(raw_post, label)
 
-            if not articles:
-                break
+                parsed[key] = value
 
-            valid_count = 0
+            if not parsed.get("shard"):
 
-            for article in articles:
+                inferred_server = extract_server_from_text(raw_post)
 
-                parsed = parse_article(
-                    article,
-                    source,
-                    url
-                )
+                if inferred_server:
+                    parsed["shard"] = inferred_server
 
-                if not parsed:
-                    continue
+            parsed["shard"] = normalize_server(parsed.get("shard"))
 
-                valid_count += 1
-
-                ok = insert_base(parsed)
-
-                if ok:
-                    all_entries.append(parsed)
-
-            print(f"VALID ENTRIES: {valid_count}")
-
-            if valid_count == 0:
-                break
-
-            next_link = soup.select_one(
-                'a[rel="next"]'
+            parsed["category"] = sanitize_category(
+                parsed.get("category")
             )
 
-            if not next_link:
-                print("NO NEXT PAGE")
-                break
+            parsed["description"] = extract_description(raw_post)
 
-            page += 1
+            parsed["post_author"] = extract_author(article)
 
-        except Exception as e:
+            parsed["post_date"] = extract_post_date(article)
 
-            print("SCRAPE ERROR")
-            print(e)
-            break
+            parsed["source_url"] = page_url
 
-    return all_entries
+            parsed["source_page"] = page
+
+            parsed["source_topic"] = (
+                topic_url
+                .split("/topic/")[1]
+                .split("/")[0]
+            )
+
+            parsed["raw_post"] = raw_post
+
+            if not parsed.get("supergroup_name"):
+                continue
+
+            if not parsed.get("shard"):
+                continue
+
+            if not parsed.get("base_code"):
+                continue
+
+            if not parsed.get("category"):
+                continue
+
+            parsed["base_code"] = clean(
+                parsed["base_code"]
+            )
+
+            parsed["base_code"] = (
+                parsed["base_code"]
+                .split(" ")[0]
+                .strip()
+            )
+
+            if not re.match(
+                r"^[A-Z0-9\-]+$",
+                parsed["base_code"],
+                re.IGNORECASE
+            ):
+                continue
+
+            print("--------------------------------------------------")
+            print("PARSED DATA:")
+            print(parsed)
+
+            if base_exists(parsed["base_code"]):
+
+                print("ALREADY EXISTS")
+                continue
+
+            print("----------------------------------------")
+            print("BASE FOUND")
+            print(parsed["supergroup_name"])
+            print(parsed["shard"])
+            print(parsed["base_code"])
+            print(parsed["category"])
+
+            inserted = insert_base(parsed)
+
+            if inserted:
+
+                TOTAL_UPSERTED += 1
+
+                print("INSERTED")
 
 # =========================================================
 # MAIN
@@ -489,23 +553,13 @@ def scrape_topic(source):
 
 def main():
 
-    print("============================================================")
-    print("SUPABASE DEBUG")
-    print("============================================================")
-    print("API_URL =", API_URL)
-    print("============================================================")
-
-    total = 0
-
     for source in SOURCES:
 
-        entries = scrape_topic(source)
-
-        total += len(entries)
+        scrape_source(source)
 
     print("============================================================")
     print("DONE")
-    print(f"TOTAL UPSERTED: {total}")
+    print(f"TOTAL UPSERTED: {TOTAL_UPSERTED}")
     print("============================================================")
 
 
