@@ -3,17 +3,23 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 import re
 
+# =========================================================
+# CONFIG
+# =========================================================
+
 BASE_FORUM_URL = (
     "https://forums.homecomingservers.com/forum/53-base-construction/"
 )
 
+HEADERS = {
+    "User-Agent": "HC-BaseCrawler/2.0"
+}
+
 MIN_YEAR = 2021
 
-MAX_TOPIC_PAGES = 10
+MAX_FORUM_PAGES = 5
 
-HEADERS = {
-    "User-Agent": "HC-BaseCrawler/1.0"
-}
+MAX_TOPIC_PAGES = 10
 
 # =========================================================
 # HELPERS
@@ -34,18 +40,18 @@ def looks_like_base_topic(title):
     t = title.lower()
 
     keywords = [
+
         "base",
-        "passcode",
         "showcase",
         "contest",
-        "sg",
-        "supergroup",
+        "passcode",
         "teleport",
         "teleporter",
         "hub",
-        "roleplay",
-        "rp",
-        "venue"
+        "sg",
+        "supergroup",
+        "venue",
+        "rp"
     ]
 
     return any(k in t for k in keywords)
@@ -56,24 +62,21 @@ def looks_like_base_topic(title):
 
 def discover_topics():
 
-    topics = []
+    found = []
 
     print("============================================================")
     print("DISCOVERING TOPICS")
     print("============================================================")
 
-    for forum_page in range(1, 6):
+    for page in range(1, MAX_FORUM_PAGES + 1):
 
-        if forum_page == 1:
+        if page == 1:
 
             url = BASE_FORUM_URL
 
         else:
 
-            url = (
-                BASE_FORUM_URL
-                + f"?page={forum_page}"
-            )
+            url = BASE_FORUM_URL + f"?page={page}"
 
         print(url)
 
@@ -90,19 +93,28 @@ def discover_topics():
                 "html.parser"
             )
 
-            links = soup.select(
-                "a[data-linktype='link']"
+            # =====================================================
+            # IPS topic links
+            # =====================================================
+
+            topic_links = soup.select(
+                "a[href*='/topic/']"
             )
 
-            for link in links:
+            print(f"RAW TOPIC LINKS: {len(topic_links)}")
 
-                href = link.get("href", "")
-                title = link.get_text(" ", strip=True)
+            for a in topic_links:
+
+                href = a.get("href", "")
+                title = a.get_text(" ", strip=True)
 
                 if not href:
                     continue
 
                 if "/topic/" not in href:
+                    continue
+
+                if not title:
                     continue
 
                 if not looks_like_base_topic(title):
@@ -118,33 +130,37 @@ def discover_topics():
                     href
                 )
 
+                # remove anchors
+                full_url = full_url.split("?do=")[0]
+                full_url = full_url.split("#")[0]
+
                 topic = {
                     "title": title,
                     "url": full_url
                 }
 
-                if topic not in topics:
+                if topic not in found:
 
-                    topics.append(topic)
+                    found.append(topic)
 
-                    print("FOUND TOPIC:")
+                    print("FOUND TOPIC")
                     print(title)
                     print(full_url)
                     print()
 
         except Exception as e:
 
-            print("ERROR:")
+            print("DISCOVERY ERROR")
             print(e)
 
     print("============================================================")
-    print(f"FOUND {len(topics)} TOPICS")
+    print(f"FOUND {len(found)} TOPICS")
     print("============================================================")
 
-    return topics
+    return found
 
 # =========================================================
-# DISCOVER TOPIC PAGES
+# DISCOVER PAGES
 # =========================================================
 
 def discover_topic_pages(topic_url):
@@ -164,13 +180,13 @@ def discover_topic_pages(topic_url):
             "html.parser"
         )
 
-        pagination_links = soup.select(
+        max_page = 1
+
+        links = soup.select(
             "a[href*='page=']"
         )
 
-        max_page = 1
-
-        for a in pagination_links:
+        for a in links:
 
             href = a.get("href", "")
 
@@ -182,15 +198,18 @@ def discover_topic_pages(topic_url):
             if not m:
                 continue
 
-            p = int(m.group(1))
+            page_num = int(m.group(1))
 
-            if p > max_page:
-                max_page = p
+            if page_num > max_page:
+                max_page = page_num
 
+        # protection anti-boucle infinie
         max_page = min(
             max_page,
             MAX_TOPIC_PAGES
         )
+
+        print(f"TOPIC PAGES: {max_page}")
 
         for p in range(2, max_page + 1):
 
@@ -200,7 +219,7 @@ def discover_topic_pages(topic_url):
 
     except Exception as e:
 
-        print("PAGE DISCOVERY ERROR:")
+        print("PAGE DISCOVERY ERROR")
         print(e)
 
     return pages
