@@ -22,13 +22,8 @@ SUPABASE_TABLE = "scraped_bases_forum"
 NOW = datetime.now(timezone.utc)
 
 # =========================================================
-# BUILD REST URL
+# REST URL
 # =========================================================
-
-# accepte :
-# https://xxx.supabase.co
-# https://xxx.supabase.co/rest/v1
-# https://xxx.supabase.co/rest/v1/table
 
 if "/rest/v1/" in SUPABASE_URL:
     REST_BASE_URL = SUPABASE_URL.split("/rest/v1")[0] + "/rest/v1"
@@ -59,13 +54,11 @@ HEADERS = {
 print("============================================================")
 print("SUPABASE DEBUG")
 print("============================================================")
-print("SUPABASE_URL =", SUPABASE_URL)
-print("REST_BASE_URL =", REST_BASE_URL)
 print("API_URL =", API_URL)
 print("============================================================")
 
 # =========================================================
-# FETCH HTML
+# FETCH
 # =========================================================
 
 def fetch_html(url):
@@ -99,27 +92,41 @@ def parse_posts(html):
 
     soup = BeautifulSoup(html, "html.parser")
 
-    posts = soup.select("article")
+    possible_posts = []
 
-    print(f"FOUND {len(posts)} POSTS")
-
-    return posts
-
-# =========================================================
-# EXTRACTION HELPERS
-# =========================================================
-
-def extract_supergroup(text):
-
-    patterns = [
-        r"Supergroup Name:\s*(.+)",
-        r"SG Name:\s*(.+)",
+    selectors = [
+        "article",
+        ".ipsComment",
+        ".cPost",
+        ".ipsComment_content",
+        ".ipsType_richText"
     ]
 
-    for p in patterns:
-        m = re.search(p, text, re.IGNORECASE)
-        if m:
-            return clean(m.group(1))
+    for selector in selectors:
+
+        found = soup.select(selector)
+
+        if found:
+            print(f"FOUND {len(found)} POSTS USING {selector}")
+            possible_posts = found
+
+            break
+
+    return possible_posts
+
+# =========================================================
+# EXTRACTION
+# =========================================================
+
+def extract_base_code(text):
+
+    m = re.search(
+        r"\b[A-Z0-9]{2,}-\d+\b",
+        text.upper()
+    )
+
+    if m:
+        return m.group(0)
 
     return None
 
@@ -142,32 +149,71 @@ def extract_shard(text):
     return None
 
 
-def extract_base_code(text):
-
-    m = re.search(r"\b[A-Z0-9]{2,}-\d+\b", text.upper())
-
-    if m:
-        return m.group(0)
-
-    return None
-
-
 def extract_category(text):
 
     patterns = [
-        r"The category your base is entering under:\s*(.+)",
+        r"The category your base is entering under:\s*(.+?)(?:Contributing builders|$)",
         r"Category:\s*(.+)"
     ]
 
     for p in patterns:
-        m = re.search(p, text, re.IGNORECASE)
+
+        m = re.search(
+            p,
+            text,
+            re.IGNORECASE
+        )
+
         if m:
             return clean(m.group(1))
 
     return None
 
+
+def extract_supergroup_name(text):
+
+    patterns = [
+        r"Supergroup Name:\s*(.+)",
+        r"SG Name:\s*(.+)",
+        r"Base Name:\s*(.+)"
+    ]
+
+    for p in patterns:
+
+        m = re.search(
+            p,
+            text,
+            re.IGNORECASE
+        )
+
+        if m:
+            return clean(m.group(1))
+
+    #
+    # FALLBACK :
+    # prendre la première ligne AVANT le shard
+    #
+
+    lines = [
+        clean(l)
+        for l in text.split("\n")
+        if clean(l)
+    ]
+
+    for i, line in enumerate(lines):
+
+        if extract_shard(line):
+
+            if i > 0:
+                candidate = lines[i - 1]
+
+                if len(candidate) < 100:
+                    return candidate
+
+    return None
+
 # =========================================================
-# CHECK EXISTING
+# EXISTS
 # =========================================================
 
 def base_exists(base_code):
@@ -182,10 +228,8 @@ def base_exists(base_code):
 
     print("CHECK STATUS:", r.status_code)
 
-    if r.text:
-        print("CHECK RESPONSE:", r.text[:300])
-
     if r.status_code != 200:
+        print(r.text[:300])
         return False
 
     try:
@@ -215,12 +259,12 @@ def upsert_entry(entry):
     print("UPSERT STATUS:", r.status_code)
 
     if r.text:
-        print("UPSERT RESPONSE:", r.text[:500])
+        print(r.text[:500])
 
     return r.status_code in [200, 201]
 
 # =========================================================
-# MAIN SCRAPER
+# SCRAPER
 # =========================================================
 
 def scrape():
@@ -233,35 +277,41 @@ def scrape():
 
     for post in posts:
 
-        text = clean(post.get_text("\n"))
+        text = post.get_text("\n", strip=True)
 
-        supergroup_name = extract_supergroup(text)
-        shard = extract_shard(text)
+        text = clean(text)
+
         base_code = extract_base_code(text)
-        category = extract_category(text)
 
-        if not supergroup_name:
-            print("SKIPPED POST - MISSING supergroup_name")
-            continue
-
-        if not shard:
-            print("SKIPPED POST - MISSING shard")
-            continue
+        #
+        # skip direct si pas de passcode
+        #
 
         if not base_code:
-            print("SKIPPED POST - MISSING base_code")
             continue
 
-        if not category:
-            print("SKIPPED POST - MISSING category")
-            continue
+        supergroup_name = extract_supergroup_name(text)
+        shard = extract_shard(text)
+        category = extract_category(text)
 
         print("----------------------------------------")
         print("BASE FOUND")
-        print(supergroup_name)
-        print(shard)
-        print(base_code)
-        print(category)
+        print("NAME:", supergroup_name)
+        print("SHARD:", shard)
+        print("CODE:", base_code)
+        print("CATEGORY:", category)
+
+        if not supergroup_name:
+            print("SKIP: NO NAME")
+            continue
+
+        if not shard:
+            print("SKIP: NO SHARD")
+            continue
+
+        if not category:
+            print("SKIP: NO CATEGORY")
+            continue
 
         exists = base_exists(base_code)
 
@@ -277,6 +327,7 @@ def scrape():
         ok = upsert_entry(entry)
 
         if ok:
+
             if exists:
                 print("UPDATED")
             else:
@@ -289,7 +340,7 @@ def scrape():
 
     print("============================================================")
     print("DONE")
-    print(f"TOTAL UPSERTED: {inserted}")
+    print("TOTAL UPSERTED:", inserted)
     print("============================================================")
 
 # =========================================================
