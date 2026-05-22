@@ -3,49 +3,55 @@
 import os
 import re
 import requests
-
 from bs4 import BeautifulSoup
-from datetime import datetime, timezone
 
 # =========================================================
 # CONFIG
 # =========================================================
-
-FORUM_URL = (
-    "https://forums.homecomingservers.com/topic/65389-2025-base-building-contest/"
-)
 
 SUPABASE_URL = os.environ["SUPABASE_URL"].rstrip("/")
 SUPABASE_KEY = os.environ["SUPABASE_KEY"]
 
 SUPABASE_TABLE = "scraped_bases_forum"
 
-NOW = datetime.now(timezone.utc)
-
 # =========================================================
-# FIX REST URL
+# FIX SUPABASE URL
 # =========================================================
 
-if "/rest/v1/" in SUPABASE_URL:
+if "/rest/v1" in SUPABASE_URL:
     REST_BASE_URL = SUPABASE_URL.split("/rest/v1")[0] + "/rest/v1"
-
-elif SUPABASE_URL.endswith("/rest/v1"):
-    REST_BASE_URL = SUPABASE_URL
-
 else:
     REST_BASE_URL = SUPABASE_URL + "/rest/v1"
 
 API_URL = f"{REST_BASE_URL}/{SUPABASE_TABLE}"
 
 # =========================================================
-# DEBUG
+# SOURCES
 # =========================================================
 
-print("============================================================")
-print("SUPABASE DEBUG")
-print("============================================================")
-print(f"API_URL = {API_URL}")
-print("============================================================")
+SOURCES = [
+
+    {
+        "url": "https://forums.homecomingservers.com/topic/62785-list-your-base-for-the-noncompetitive-our-based-showcase/",
+        "fields": {
+            "supergroup_name": "Supergroup Name:",
+            "shard": "Shard/Server:",
+            "base_code": "Base Code:",
+            "category": "Category to list base in:"
+        }
+    },
+
+    {
+        "url": "https://forums.homecomingservers.com/topic/56486-2025-homecoming-base-contest-rules-entries-thread/",
+        "fields": {
+            "supergroup_name": "Your base’s name:",
+            "shard": "The shard it is located on:",
+            "base_code": "The passcode for entry:",
+            "category": "The category your base is entering under:"
+        }
+    }
+
+]
 
 # =========================================================
 # HEADERS
@@ -66,115 +72,66 @@ SUPABASE_HEADERS = {
 # HELPERS
 # =========================================================
 
-VALID_SHARDS = [
-    "Everlasting",
-    "Excelsior",
-    "Torchbearer",
-    "Indomitable",
-    "Victory",
-    "Reunion"
-]
-
-VALID_CATEGORIES = [
-    "Arcane",
-    "Tech",
-    "Roleplay",
-    "RP",
-    "Transit",
-    "Hub",
-    "Misc",
-    "Other",
-    "Realism",
-    "Utilities",
-    "Maze"
-]
-
-# =========================================================
-# CLEAN
-# =========================================================
-
 def clean(text):
-
     if not text:
         return ""
 
-    text = text.replace("\xa0", " ")
-
+    text = text.replace("\u00a0", " ")
     text = re.sub(r"\s+", " ", text)
 
     return text.strip()
 
-# =========================================================
-# EXTRACTORS
-# =========================================================
 
-def extract_base_code(text):
+def extract_field(text, label):
+
+    pattern = rf"{re.escape(label)}\s*(.+?)(?=(?:[A-Z][^:\n]+:)|$)"
 
     m = re.search(
-        r"\b([A-Z0-9]{2,}-\d{3,})\b",
+        pattern,
         text,
-        re.IGNORECASE
+        flags=re.IGNORECASE | re.DOTALL
     )
 
-    if m:
-        return m.group(1).upper()
+    if not m:
+        return ""
 
-    return None
+    value = clean(m.group(1))
 
+    value = re.sub(r"Edited .*", "", value, flags=re.IGNORECASE)
 
-def extract_shard(text):
-
-    for shard in VALID_SHARDS:
-
-        if re.search(
-            rf"\b{re.escape(shard)}\b",
-            text,
-            re.IGNORECASE
-        ):
-            return shard
-
-    return None
+    return clean(value)
 
 
-def extract_category(text):
+def normalize_code(code):
 
-    lower = text.lower()
+    if not code:
+        return ""
 
-    for category in VALID_CATEGORIES:
+    code = code.upper().strip()
 
-        if category.lower() in lower:
-            return category
+    m = re.search(r"[A-Z0-9]{2,}-\d+", code)
 
-    return None
+    if not m:
+        return ""
+
+    return m.group(0)
 
 
-def extract_supergroup_name(text):
+def valid_base(data):
 
-    patterns = [
-
-        r"BASE FOUND\s+(.+?)\s+(Everlasting|Excelsior|Torchbearer|Indomitable|Victory|Reunion)",
-
-        r"Supergroup Name[:\s]+(.+?)(?:Shard|Server|Passcode|Base Code)",
-
-        r"Name[:\s]+(.+?)(?:Shard|Server|Passcode|Base Code)"
+    required = [
+        "supergroup_name",
+        "shard",
+        "base_code",
+        "category"
     ]
 
-    for pattern in patterns:
+    for field in required:
+        if not data.get(field):
+            return False
 
-        m = re.search(
-            pattern,
-            text,
-            re.IGNORECASE | re.DOTALL
-        )
+    return True
 
-        if m:
-
-            value = clean(m.group(1))
-
-            if len(value) > 2:
-                return value
-
-    return None
 
 # =========================================================
 # SUPABASE
@@ -185,9 +142,8 @@ def base_exists(base_code):
     url = API_URL
 
     params = {
-        "select": "id",
         "base_code": f"eq.{base_code}",
-        "limit": 1
+        "select": "id"
     }
 
     r = requests.get(
@@ -197,28 +153,33 @@ def base_exists(base_code):
         timeout=30
     )
 
-    if r.status_code != 200:
-        print("CHECK STATUS:", r.status_code)
+    print("CHECK STATUS:", r.status_code)
+
+    if r.status_code >= 400:
         print("CHECK RESPONSE:", r.text)
         return False
 
-    data = r.json()
+    try:
+        data = r.json()
+        return len(data) > 0
+    except:
+        return False
 
-    return len(data) > 0
 
+def upsert_base(data):
 
-def upsert_entry(entry):
+    url = API_URL
 
     params = {
         "on_conflict": "base_code"
     }
 
     r = requests.post(
-        API_URL,
+        url,
         headers=SUPABASE_HEADERS,
         params=params,
-        json=[entry],
-        timeout=30
+        json=data,
+        timeout=60
     )
 
     print("UPSERT STATUS:", r.status_code)
@@ -226,16 +187,25 @@ def upsert_entry(entry):
     if r.text:
         print("UPSERT RESPONSE:", r.text[:500])
 
-    return r.status_code in [200, 201]
+    return r.status_code < 300
+
 
 # =========================================================
-# MAIN
+# SCRAPER
 # =========================================================
 
-def main():
+def scrape_source(source):
+
+    url = source["url"]
+    fields = source["fields"]
+
+    print("============================================================")
+    print("SCRAPING")
+    print(url)
+    print("============================================================")
 
     r = requests.get(
-        FORUM_URL,
+        url,
         headers=HEADERS,
         timeout=60
     )
@@ -244,8 +214,6 @@ def main():
 
     soup = BeautifulSoup(r.text, "html.parser")
 
-    posts = []
-
     selectors = [
         ".ipsComment_content",
         ".cPost_contentWrap",
@@ -253,93 +221,114 @@ def main():
         "article"
     ]
 
+    posts = []
+
     for selector in selectors:
 
         found = soup.select(selector)
 
         print(f"FOUND {len(found)} POSTS USING {selector}")
 
-        posts.extend(found)
+        if found:
+            posts.extend(found)
 
-    print(f"TOTAL RAW POSTS: {len(posts)}")
-    print("============================================================")
+    # remove duplicates
+    unique_posts = []
 
-    inserted = 0
+    seen = set()
 
-    for idx, post in enumerate(posts):
+    for post in posts:
 
-        text = post.get_text("\n", strip=True)
+        text = clean(post.get_text("\n", strip=True))
 
-        text = clean(text)
-
-        print("--------------------------------------------------")
-        print(f"POST #{idx + 1}")
-        print("--------------------------------------------------")
-        print(text[:2000])
-        print()
-
-        if len(text) < 100:
-            print("TOO SHORT")
+        if not text:
             continue
 
-        base_code = extract_base_code(text)
-        supergroup_name = extract_supergroup_name(text)
-        shard = extract_shard(text)
-        category = extract_category(text)
-
-        print("PARSED:")
-        print("supergroup_name =", supergroup_name)
-        print("shard =", shard)
-        print("base_code =", base_code)
-        print("category =", category)
-
-        if not base_code:
-            print("SKIP: no base code")
+        if text in seen:
             continue
 
-        if not supergroup_name:
-            print("SKIP: no supergroup name")
+        seen.add(text)
+
+        unique_posts.append(text)
+
+    print(f"TOTAL RAW POSTS: {len(unique_posts)}")
+
+    total_inserted = 0
+
+    for text in unique_posts:
+
+        data = {}
+
+        for key, label in fields.items():
+
+            value = extract_field(text, label)
+
+            data[key] = value
+
+        data["base_code"] = normalize_code(
+            data.get("base_code", "")
+        )
+
+        if not valid_base(data):
             continue
 
-        if not shard:
-            print("SKIP: no shard")
+        print("----------------------------------------")
+        print("BASE FOUND")
+        print(data["supergroup_name"])
+        print(data["shard"])
+        print(data["base_code"])
+        print(data["category"])
+
+        exists = base_exists(data["base_code"])
+
+        if exists:
+            print("ALREADY EXISTS")
             continue
 
-        if not category:
-            print("SKIP: no category")
-            continue
+        inserted = upsert_base(data)
 
-        exists = base_exists(base_code)
-
-        entry = {
-            "supergroup_name": supergroup_name,
-            "shard": shard,
-            "base_code": base_code,
-            "category": category,
-            "raw_text": text,
-            "scraped_at": NOW.isoformat()
-        }
-
-        ok = upsert_entry(entry)
-
-        if ok:
-
-            if exists:
-                print("UPDATED")
-            else:
-                print("INSERTED")
-
-            inserted += 1
-
+        if inserted:
+            print("INSERTED")
+            total_inserted += 1
         else:
             print("INSERT FAILED")
 
-    print("============================================================")
-    print("DONE")
-    print(f"TOTAL UPSERTED: {inserted}")
-    print("============================================================")
+    return total_inserted
+
 
 # =========================================================
+# MAIN
+# =========================================================
+
+def main():
+
+    print("============================================================")
+    print("SUPABASE DEBUG")
+    print("============================================================")
+    print("API_URL =", API_URL)
+    print("============================================================")
+
+    total = 0
+
+    for source in SOURCES:
+
+        try:
+            inserted = scrape_source(source)
+
+            total += inserted
+
+        except Exception as e:
+
+            print("============================================================")
+            print("ERROR")
+            print("============================================================")
+            print(e)
+
+    print("============================================================")
+    print("DONE")
+    print(f"TOTAL UPSERTED: {total}")
+    print("============================================================")
+
 
 if __name__ == "__main__":
     main()
