@@ -1,5 +1,4 @@
 import os
-import re
 import sys
 import requests
 from bs4 import BeautifulSoup
@@ -9,12 +8,23 @@ from urllib.parse import urljoin
 # SUPABASE CONFIG
 # ============================================================
 
-SUPABASE_URL = os.environ["SUPABASE_URL"].rstrip("/")
-SUPABASE_KEY = os.environ["SUPABASE_KEY"]
+SUPABASE_URL = os.environ["SUPABASE_URL"].strip().rstrip("/")
+SUPABASE_KEY = os.environ["SUPABASE_KEY"].strip()
 
 TABLE_NAME = "scraped_bases_forum"
 
+# IMPORTANT :
+# Tes autres scripts utilisent déjà /rest/v1
+# donc on NE le rajoute PAS ici
+
 API_URL = f"{SUPABASE_URL}/{TABLE_NAME}"
+
+print("=" * 60)
+print("SUPABASE DEBUG")
+print("=" * 60)
+print("SUPABASE_URL =", SUPABASE_URL)
+print("API_URL =", API_URL)
+print("=" * 60)
 
 HEADERS = {
     "apikey": SUPABASE_KEY,
@@ -54,7 +64,7 @@ SOURCES = [
 ]
 
 # ============================================================
-# FILTERS
+# BAD VALUES
 # ============================================================
 
 BAD_VALUES = [
@@ -86,11 +96,11 @@ def extract_field(content, keyword):
 
     for line in lines:
 
-        clean_line = clean_text(line)
+        line = clean_text(line)
 
-        if clean_line.lower().startswith(keyword.lower()):
+        if line.lower().startswith(keyword.lower()):
 
-            value = clean_line[len(keyword):].strip()
+            value = line[len(keyword):].strip()
 
             if value.lower() in BAD_VALUES:
                 return None
@@ -129,7 +139,6 @@ def get_total_pages(url):
         if "/page/" in href:
 
             full_url = urljoin(url, href)
-
             full_url = full_url.split("?")[0]
 
             if full_url not in pages:
@@ -188,7 +197,9 @@ def base_exists(base_code, shard):
     print("CHECK STATUS:", r.status_code)
 
     if r.status_code != 200:
+
         print("CHECK RESPONSE:", r.text)
+
         return False
 
     data = r.json()
