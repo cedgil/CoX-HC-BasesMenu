@@ -10,8 +10,10 @@ from datetime import datetime, timezone
 # CONFIG
 # =========================================================
 
-FORUM_URL = (
-    "https://forums.homecomingservers.com/topic/53862-2025-base-building-contest/"
+TOPIC_ID = 53862
+
+FORUM_JSON_URL = (
+    f"https://forums.homecomingservers.com/topic/{TOPIC_ID}-2025-base-building-contest/?do=getNewComment"
 )
 
 SUPABASE_URL = os.environ["SUPABASE_URL"].rstrip("/")
@@ -58,14 +60,26 @@ print("API_URL =", API_URL)
 print("============================================================")
 
 # =========================================================
-# FETCH
+# HELPERS
 # =========================================================
 
-def fetch_html(url):
+def clean(text):
+    return re.sub(r"\s+", " ", text or "").strip()
+
+# =========================================================
+# FETCH POSTS
+# =========================================================
+
+def fetch_topic_html():
 
     headers = {
         "User-Agent": "Mozilla/5.0"
     }
+
+    url = (
+        "https://forums.homecomingservers.com/topic/"
+        "53862-2025-base-building-contest/"
+    )
 
     r = requests.get(
         url,
@@ -78,27 +92,22 @@ def fetch_html(url):
     return r.text
 
 # =========================================================
-# CLEAN
+# EXTRACT POSTS
 # =========================================================
 
-def clean(text):
-    return re.sub(r"\s+", " ", text or "").strip()
-
-# =========================================================
-# PARSE POSTS
-# =========================================================
-
-def parse_posts(html):
+def extract_posts(html):
 
     soup = BeautifulSoup(html, "html.parser")
 
-    possible_posts = []
+    posts = []
+
+    #
+    # vrai contenu IPS
+    #
 
     selectors = [
-        "article",
-        ".ipsComment",
-        ".cPost",
         ".ipsComment_content",
+        ".cPost_contentWrap",
         ".ipsType_richText"
     ]
 
@@ -108,11 +117,9 @@ def parse_posts(html):
 
         if found:
             print(f"FOUND {len(found)} POSTS USING {selector}")
-            possible_posts = found
+            posts.extend(found)
 
-            break
-
-    return possible_posts
+    return posts
 
 # =========================================================
 # EXTRACTION
@@ -125,10 +132,7 @@ def extract_base_code(text):
         text.upper()
     )
 
-    if m:
-        return m.group(0)
-
-    return None
+    return m.group(0) if m else None
 
 
 def extract_shard(text):
@@ -190,8 +194,8 @@ def extract_supergroup_name(text):
             return clean(m.group(1))
 
     #
-    # FALLBACK :
-    # prendre la première ligne AVANT le shard
+    # fallback :
+    # première ligne raisonnable
     #
 
     lines = [
@@ -200,15 +204,14 @@ def extract_supergroup_name(text):
         if clean(l)
     ]
 
-    for i, line in enumerate(lines):
+    for line in lines:
 
-        if extract_shard(line):
-
-            if i > 0:
-                candidate = lines[i - 1]
-
-                if len(candidate) < 100:
-                    return candidate
+        if (
+            len(line) < 80
+            and not extract_shard(line)
+            and not extract_base_code(line)
+        ):
+            return line
 
     return None
 
@@ -226,10 +229,7 @@ def base_exists(base_code):
         timeout=30
     )
 
-    print("CHECK STATUS:", r.status_code)
-
     if r.status_code != 200:
-        print(r.text[:300])
         return False
 
     try:
@@ -259,19 +259,21 @@ def upsert_entry(entry):
     print("UPSERT STATUS:", r.status_code)
 
     if r.text:
-        print(r.text[:500])
+        print(r.text[:300])
 
     return r.status_code in [200, 201]
 
 # =========================================================
-# SCRAPER
+# MAIN SCRAPER
 # =========================================================
 
 def scrape():
 
-    html = fetch_html(FORUM_URL)
+    html = fetch_topic_html()
 
-    posts = parse_posts(html)
+    posts = extract_posts(html)
+
+    print("TOTAL RAW POSTS:", len(posts))
 
     inserted = 0
 
@@ -279,13 +281,10 @@ def scrape():
 
         text = post.get_text("\n", strip=True)
 
-        text = clean(text)
+        if len(text) < 100:
+            continue
 
         base_code = extract_base_code(text)
-
-        #
-        # skip direct si pas de passcode
-        #
 
         if not base_code:
             continue
@@ -296,21 +295,18 @@ def scrape():
 
         print("----------------------------------------")
         print("BASE FOUND")
-        print("NAME:", supergroup_name)
-        print("SHARD:", shard)
-        print("CODE:", base_code)
-        print("CATEGORY:", category)
+        print(supergroup_name)
+        print(shard)
+        print(base_code)
+        print(category)
 
         if not supergroup_name:
-            print("SKIP: NO NAME")
             continue
 
         if not shard:
-            print("SKIP: NO SHARD")
             continue
 
         if not category:
-            print("SKIP: NO CATEGORY")
             continue
 
         exists = base_exists(base_code)
@@ -334,9 +330,6 @@ def scrape():
                 print("INSERTED")
 
             inserted += 1
-
-        else:
-            print("INSERT FAILED")
 
     print("============================================================")
     print("DONE")
