@@ -12,7 +12,7 @@ from bs4 import BeautifulSoup
 SUPABASE_URL = os.environ["SUPABASE_URL"].rstrip("/")
 SUPABASE_KEY = os.environ["SUPABASE_KEY"]
 
-SUPABASE_TABLE = "scraped_bases_forum"
+TABLE_NAME = "scraped_bases_forum"
 
 # =========================================================
 # FIX REST URL
@@ -23,7 +23,7 @@ if "/rest/v1" in SUPABASE_URL:
 else:
     REST_BASE_URL = SUPABASE_URL + "/rest/v1"
 
-API_URL = f"{REST_BASE_URL}/{SUPABASE_TABLE}"
+API_URL = f"{REST_BASE_URL}/{TABLE_NAME}"
 
 # =========================================================
 # SOURCES
@@ -61,10 +61,6 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0"
 }
 
-# =========================================================
-# SUPABASE HEADERS
-# =========================================================
-
 SUPABASE_HEADERS = {
     "apikey": SUPABASE_KEY,
     "Authorization": f"Bearer {SUPABASE_KEY}",
@@ -75,41 +71,54 @@ SUPABASE_HEADERS = {
 # HELPERS
 # =========================================================
 
-def clean(value):
-    if not value:
+def normalize_text(text):
+
+    if not text:
         return ""
-    return " ".join(value.strip().split())
+
+    text = text.replace("\xa0", " ")
+    text = text.replace("\r", "\n")
+
+    text = re.sub(r"\s+", " ", text)
+
+    return text.strip()
 
 
 def extract_field(text, label):
 
-    pattern = rf"{re.escape(label)}\s*(.+?)(?=\n[A-Z][^\n:]+:|\Z)"
+    chunks = re.split(r"[\n\r]+| {2,}", text)
+
+    for chunk in chunks:
+
+        chunk = chunk.strip()
+
+        if label.lower() in chunk.lower():
+
+            idx = chunk.lower().find(label.lower())
+
+            value = chunk[idx + len(label):].strip()
+
+            if value:
+                return normalize_text(value)
+
+    # fallback ultra permissif
+    pattern = re.escape(label) + r"\s*(.*?)(?:$|\n)"
 
     match = re.search(
         pattern,
         text,
-        flags=re.IGNORECASE | re.DOTALL
+        re.IGNORECASE | re.DOTALL
     )
 
-    if not match:
-        return ""
+    if match:
+        return normalize_text(match.group(1))
 
-    return clean(match.group(1))
+    return ""
 
-
-def is_valid_base_code(code):
-
-    return bool(
-        re.match(r"^[A-Z0-9]+-\d+$", code.upper())
-    )
-
-# =========================================================
-# CHECK EXISTING
-# =========================================================
 
 def base_exists(base_code):
 
-    url = f"{API_URL}?base_code=eq.{base_code}"
+    url = f"{API_URL}?base_code=eq.{base_code}&select=id"
 
     response = requests.get(
         url,
@@ -127,39 +136,23 @@ def base_exists(base_code):
 
     return len(data) > 0
 
-# =========================================================
-# INSERT
-# =========================================================
 
-def insert_base(payload):
+def insert_base(data):
 
     response = requests.post(
         API_URL,
         headers=SUPABASE_HEADERS,
-        json=payload,
+        json=data,
         timeout=30
     )
 
-    print("INSERT STATUS:", response.status_code)
+    print("UPSERT STATUS:", response.status_code)
 
-    if response.status_code >= 300:
-        print("INSERT RESPONSE:", response.text)
-        return False
+    if response.text:
+        print("UPSERT RESPONSE:", response.text[:1000])
 
-    return True
+    return response.status_code in [200, 201]
 
-# =========================================================
-# PARSE POST
-# =========================================================
-
-def parse_post(text, fields):
-
-    parsed = {}
-
-    for key, label in fields.items():
-        parsed[key] = extract_field(text, label)
-
-    return parsed
 
 # =========================================================
 # SCRAPER
@@ -178,8 +171,6 @@ def scrape_source(source):
         timeout=60
     )
 
-    response.raise_for_status()
-
     soup = BeautifulSoup(response.text, "html.parser")
 
     selectors = [
@@ -193,70 +184,66 @@ def scrape_source(source):
 
     for selector in selectors:
 
-        posts = soup.select(selector)
+        found = soup.select(selector)
 
-        print(f"FOUND {len(posts)} POSTS USING {selector}")
+        print(f"FOUND {len(found)} POSTS USING {selector}")
 
-        for post in posts:
-
-            text = clean(
-                post.get_text("\n", strip=True)
-            )
-
-            if len(text) > 100:
-                raw_posts.append(text)
+        raw_posts.extend(found)
 
     print(f"TOTAL RAW POSTS: {len(raw_posts)}")
 
     inserted = 0
 
-    for text in raw_posts:
+    for post in raw_posts:
 
-        parsed = parse_post(
-            text,
-            source["fields"]
-        )
+        text = normalize_text(post.get_text(" ", strip=True))
 
-        if not parsed.get("supergroup_name"):
+        if len(text) < 50:
             continue
 
-        if not parsed.get("shard"):
+        data = {}
+
+        for field_name, label in source["fields"].items():
+
+            data[field_name] = extract_field(
+                text,
+                label
+            )
+
+        if not all([
+            data.get("supergroup_name"),
+            data.get("shard"),
+            data.get("base_code"),
+            data.get("category")
+        ]):
+
+            print("FAILED PARSE")
+            print(text[:1000])
+            print("--------------------------------")
+            print(data)
+            print("================================")
+
             continue
 
-        if not parsed.get("base_code"):
-            continue
-
-        if not parsed.get("category"):
-            continue
-
-        parsed["base_code"] = parsed["base_code"].upper()
-
-        if not is_valid_base_code(parsed["base_code"]):
-            continue
+        data["source_url"] = source["url"]
 
         print("--------------------------------------------------")
         print("PARSED DATA:")
-        print(parsed)
+        print(data)
 
-        print("----------------------------------------")
-        print("BASE FOUND")
-        print(parsed["supergroup_name"])
-        print(parsed["shard"])
-        print(parsed["base_code"])
-        print(parsed["category"])
+        if base_exists(data["base_code"]):
 
-        if base_exists(parsed["base_code"]):
             print("ALREADY EXISTS")
             continue
 
-        payload = {
-            "supergroup_name": parsed["supergroup_name"],
-            "shard": parsed["shard"],
-            "base_code": parsed["base_code"],
-            "category": parsed["category"]
-        }
+        print("----------------------------------------")
+        print("BASE FOUND")
+        print(data["supergroup_name"])
+        print(data["shard"])
+        print(data["base_code"])
+        print(data["category"])
 
-        success = insert_base(payload)
+        success = insert_base(data)
 
         if success:
             print("INSERTED")
@@ -281,6 +268,7 @@ def main():
     total = 0
 
     for source in SOURCES:
+
         total += scrape_source(source)
 
     print("============================================================")
@@ -288,7 +276,6 @@ def main():
     print(f"TOTAL UPSERTED: {total}")
     print("============================================================")
 
-# =========================================================
 
 if __name__ == "__main__":
     main()
