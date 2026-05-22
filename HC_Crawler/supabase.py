@@ -1,99 +1,91 @@
+import os
 import requests
 
-from datetime import datetime, timezone
+SUPABASE_URL = os.environ["SUPABASE_URL"].rstrip("/")
+SUPABASE_KEY = os.environ["SUPABASE_KEY"]
 
-from config import (
-    REST_BASE_URL,
-    TABLE_NAME,
-    HEADERS
-)
+TABLE_NAME = "scraped_forum_bases"
 
 # =========================================================
-
-def compute_icon(category):
-
-    if not category:
-        return "Base_Portal"
-
-    c = category.lower()
-
-    if "realism" in c:
-        return "MissionArchitect"
-
-    if "fantasy" in c:
-        return "Croatoa"
-
-    if "arcane" in c:
-        return "Mystic"
-
-    if "tech" in c or "sci" in c:
-        return "TechLabs"
-
-    if "club" in c:
-        return "PocketD"
-
-    if "hub" in c:
-        return "Base_Transport"
-
-    if "nature" in c:
-        return "Eden"
-
-    if "maze" in c:
-        return "Tunnels"
-
-    if "floating" in c:
-        return "ShadowShard"
-
-    if "novice" in c:
-        return "TrainingRoom"
-
-    return "Base_Portal"
-
+# FIX REST URL
 # =========================================================
 
-def upsert_base(data):
+if "/rest/v1/" in SUPABASE_URL:
 
-    url = f"{REST_BASE_URL}/{TABLE_NAME}"
+    REST_BASE_URL = (
+        SUPABASE_URL.split("/rest/v1")[0]
+        + "/rest/v1"
+    )
 
-    now = datetime.now(
-        timezone.utc
-    ).isoformat()
+elif SUPABASE_URL.endswith("/rest/v1"):
 
-    payload = {
-        "supergroup_name": data["supergroup_name"],
-        "shard": data["shard"],
-        "base_code": data["base_code"],
-        "category": data["category"],
+    REST_BASE_URL = SUPABASE_URL
 
-        "icon": compute_icon(
-            data["category"]
-        ),
+else:
 
-        "source_topic": data["source_topic"],
-        "source_url": data["source_url"],
-        "source_page": data["source_page"],
+    REST_BASE_URL = (
+        SUPABASE_URL
+        + "/rest/v1"
+    )
 
-        "post_author": data["post_author"],
+API_URL = f"{REST_BASE_URL}/{TABLE_NAME}"
 
-        "raw_post": data["raw_post"],
+print("============================================================")
+print("SUPABASE DEBUG")
+print("============================================================")
+print("SUPABASE_URL =", SUPABASE_URL)
+print("REST_BASE_URL =", REST_BASE_URL)
+print("API_URL =", API_URL)
+print("============================================================")
 
-        "scraped_at": now,
-        "updated_at": now
+
+def headers():
+
+    return {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json"
     }
 
-    params = {
-        "on_conflict": "base_code,shard"
-    }
+
+def base_exists(base_code):
+
+    r = requests.get(
+        API_URL,
+        headers=headers(),
+        params={
+            "base_code": f"eq.{base_code}",
+            "select": "id",
+            "limit": 1
+        },
+        timeout=30
+    )
+
+    if r.status_code != 200:
+        print(r.status_code)
+        print(r.text)
+        return False
+
+    try:
+        data = r.json()
+        return len(data) > 0
+
+    except:
+        return False
+
+
+def insert_base(base):
 
     r = requests.post(
-        url,
-        headers=HEADERS,
-        params=params,
-        json=payload,
-        timeout=60
+        API_URL,
+        headers=headers(),
+        json=base,
+        timeout=30
     )
 
     print(r.status_code)
 
-    if r.status_code >= 400:
+    if r.status_code >= 300:
         print(r.text)
+
+    return r.status_code < 300
