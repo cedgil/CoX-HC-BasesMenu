@@ -69,55 +69,62 @@ def discover_topics():
 
     found = []
 
-    r = requests.get(
-        RSS_URL,
-        headers=HEADERS,
-        timeout=30
-    )
+    try:
 
-    print("RSS STATUS:", r.status_code)
+        r = requests.get(
+            RSS_URL,
+            headers=HEADERS,
+            timeout=30
+        )
 
-    soup = BeautifulSoup(
-        r.text,
-        "xml"
-    )
+        print("RSS STATUS:", r.status_code)
 
-    items = soup.find_all("item")
+        soup = BeautifulSoup(
+            r.text,
+            "html.parser"
+        )
 
-    print(f"RSS ITEMS: {len(items)}")
+        items = soup.find_all("item")
 
-    for item in items:
+        print(f"RSS ITEMS: {len(items)}")
 
-        title_tag = item.find("title")
-        link_tag = item.find("link")
+        for item in items:
 
-        if not title_tag or not link_tag:
-            continue
+            title_tag = item.find("title")
+            link_tag = item.find("link")
 
-        title = title_tag.text.strip()
-        url = link_tag.text.strip()
+            if not title_tag or not link_tag:
+                continue
 
-        if not looks_like_base_topic(title):
-            continue
+            title = title_tag.text.strip()
+            url = link_tag.text.strip()
 
-        year = extract_year(title)
+            if not looks_like_base_topic(title):
+                continue
 
-        if year and year < MIN_YEAR:
-            continue
+            year = extract_year(title)
 
-        topic = {
-            "title": title,
-            "url": url
-        }
+            if year and year < MIN_YEAR:
+                continue
 
-        if topic not in found:
+            topic = {
+                "title": title,
+                "url": url
+            }
 
-            found.append(topic)
+            if topic not in found:
 
-            print("FOUND TOPIC")
-            print(title)
-            print(url)
-            print()
+                found.append(topic)
+
+                print("FOUND TOPIC")
+                print(title)
+                print(url)
+                print()
+
+    except Exception as e:
+
+        print("RSS ERROR")
+        print(e)
 
     print("============================================================")
     print(f"FOUND {len(found)} TOPICS")
@@ -144,7 +151,7 @@ def discover_topic_pages(topic_url):
         html = r.text
 
         page_numbers = re.findall(
-            r"page=(\d+)",
+            r"[?&]page=(\d+)",
             html
         )
 
