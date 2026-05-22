@@ -2,6 +2,7 @@ import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 import re
+import json
 
 # =========================================================
 # CONFIG
@@ -12,7 +13,11 @@ BASE_FORUM_URL = (
 )
 
 HEADERS = {
-    "User-Agent": "HC-BaseCrawler/2.0"
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0 Safari/537.36"
+    )
 }
 
 MIN_YEAR = 2021
@@ -88,31 +93,43 @@ def discover_topics():
                 timeout=30
             )
 
-            soup = BeautifulSoup(
-                r.text,
-                "html.parser"
-            )
+            print("STATUS:", r.status_code)
+
+            html = r.text
+
+            print("HTML SIZE:", len(html))
 
             # =====================================================
-            # IPS topic links
+            # FALLBACK DEBUG
             # =====================================================
 
-            topic_links = soup.select(
-                "a[href*='/topic/']"
+            if "/topic/" not in html:
+
+                print("NO /topic/ FOUND IN HTML")
+                print(html[:500])
+                continue
+
+            # =====================================================
+            # RAW REGEX EXTRACTION
+            # =====================================================
+
+            matches = re.findall(
+
+                r'href="([^"]+/topic/\d+[^"]*)".*?>(.*?)<',
+
+                html,
+
+                re.IGNORECASE | re.DOTALL
             )
 
-            print(f"RAW TOPIC LINKS: {len(topic_links)}")
+            print("RAW MATCHES:", len(matches))
 
-            for a in topic_links:
+            for href, raw_title in matches:
 
-                href = a.get("href", "")
-                title = a.get_text(" ", strip=True)
-
-                if not href:
-                    continue
-
-                if "/topic/" not in href:
-                    continue
+                title = BeautifulSoup(
+                    raw_title,
+                    "html.parser"
+                ).get_text(" ", strip=True)
 
                 if not title:
                     continue
@@ -130,9 +147,8 @@ def discover_topics():
                     href
                 )
 
-                # remove anchors
-                full_url = full_url.split("?do=")[0]
                 full_url = full_url.split("#")[0]
+                full_url = full_url.split("?do=")[0]
 
                 topic = {
                     "title": title,
@@ -175,35 +191,27 @@ def discover_topic_pages(topic_url):
             timeout=30
         )
 
-        soup = BeautifulSoup(
-            r.text,
-            "html.parser"
+        html = r.text
+
+        page_numbers = re.findall(
+            r"page=(\d+)",
+            html
         )
 
         max_page = 1
 
-        links = soup.select(
-            "a[href*='page=']"
-        )
+        for p in page_numbers:
 
-        for a in links:
+            try:
 
-            href = a.get("href", "")
+                p = int(p)
 
-            m = re.search(
-                r"page=(\d+)",
-                href
-            )
+                if p > max_page:
+                    max_page = p
 
-            if not m:
-                continue
+            except:
+                pass
 
-            page_num = int(m.group(1))
-
-            if page_num > max_page:
-                max_page = page_num
-
-        # protection anti-boucle infinie
         max_page = min(
             max_page,
             MAX_TOPIC_PAGES
