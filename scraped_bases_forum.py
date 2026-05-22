@@ -87,12 +87,64 @@ SHARD_ALIASES = {
     "ever": "Everlasting",
     "everlasting": "Everlasting",
 
-    "reunion": "Reunion",
-
     "indo": "Indomitable",
     "indomitable": "Indomitable",
 
+    "reunion": "Reunion",
+
     "victory": "Victory"
+}
+
+# =========================================================
+# FIELD STOP LABELS
+# =========================================================
+
+STOP_LABELS = [
+
+    "Contributing builders",
+    "Any additional information",
+    "Special or Hidden Features",
+    "Is flight or teleportation useful",
+    "Description",
+    "Base Owner",
+    "Base Builder",
+    "Edited",
+    "---"
+]
+
+# =========================================================
+# SHARD DETECTION
+# =========================================================
+
+SHARD_PATTERNS = {
+
+    "Torchbearer": [
+        r"\btorch\b",
+        r"\btorchbearer\b"
+    ],
+
+    "Excelsior": [
+        r"\bexcel\b",
+        r"\bexcelsior\b"
+    ],
+
+    "Everlasting": [
+        r"\bever\b",
+        r"\beverlasting\b"
+    ],
+
+    "Indomitable": [
+        r"\bindo\b",
+        r"\bindomitable\b"
+    ],
+
+    "Reunion": [
+        r"\breunion\b"
+    ],
+
+    "Victory": [
+        r"\bvictory\b"
+    ]
 }
 
 # =========================================================
@@ -123,6 +175,20 @@ def normalize_shard(shard):
     return shard.title()
 
 
+def detect_shard_from_text(text):
+
+    t = text.lower()
+
+    for shard, patterns in SHARD_PATTERNS.items():
+
+        for pattern in patterns:
+
+            if re.search(pattern, t):
+                return shard
+
+    return None
+
+
 def remove_forum_garbage(text):
 
     lines = []
@@ -144,6 +210,15 @@ def remove_forum_garbage(text):
             continue
 
         if line in ["(edited)"]:
+            continue
+
+        if "Give me money to draw your characters" in line:
+            continue
+
+        if "Visit one of the public RP spaces" in line:
+            continue
+
+        if "AE arc" in line:
             continue
 
         lines.append(line)
@@ -197,6 +272,13 @@ def extract_field(block, label, all_labels):
             continue
 
         pos = block.lower().find(other.lower(), start)
+
+        if pos != -1:
+            next_positions.append(pos)
+
+    for stop in STOP_LABELS:
+
+        pos = block.lower().find(stop.lower(), start)
 
         if pos != -1:
             next_positions.append(pos)
@@ -423,11 +505,27 @@ def scrape_source(source):
                 parsed.get("shard", "")
             )
 
-            parsed["category"] = clean(
-                parsed.get("category", "").split(
-                    "Special or Hidden"
-                )[0]
-            )
+            if not parsed["shard"]:
+
+                detected = detect_shard_from_text(block)
+
+                if detected:
+                    parsed["shard"] = detected
+
+            category = parsed.get("category", "")
+
+            for stop in STOP_LABELS:
+
+                category = category.split(stop)[0]
+
+            category = re.split(
+                r"\b\d+\b",
+                category
+            )[0]
+
+            category = clean(category)
+
+            parsed["category"] = category
 
             parsed["supergroup_name"] = clean(
                 parsed.get("supergroup_name")
@@ -438,6 +536,10 @@ def scrape_source(source):
             print("--------------------------------------------------")
             print("PARSED DATA:")
             print(parsed)
+
+            if not parsed["shard"]:
+                print("SKIPPED - NO SHARD")
+                continue
 
             if base_exists(parsed["base_code"]):
                 print("ALREADY EXISTS")
