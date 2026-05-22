@@ -3,6 +3,7 @@
 import os
 import re
 import requests
+
 from bs4 import BeautifulSoup
 
 # =========================================================
@@ -73,34 +74,73 @@ SUPABASE_HEADERS = {
 # =========================================================
 
 def clean(text):
+
     if not text:
         return ""
 
     text = text.replace("\u00a0", " ")
+
     text = re.sub(r"\s+", " ", text)
 
     return text.strip()
 
+# =========================================================
+# FIELD EXTRACTION
+# =========================================================
 
 def extract_field(text, label):
 
-    pattern = rf"{re.escape(label)}\s*(.+?)(?=(?:[A-Z][^:\n]+:)|$)"
+    idx = text.lower().find(label.lower())
 
-    m = re.search(
-        pattern,
-        text,
-        flags=re.IGNORECASE | re.DOTALL
-    )
-
-    if not m:
+    if idx == -1:
         return ""
 
-    value = clean(m.group(1))
+    start = idx + len(label)
 
-    value = re.sub(r"Edited .*", "", value, flags=re.IGNORECASE)
+    chunk = text[start:start + 1500]
 
-    return clean(value)
+    stop_patterns = [
 
+        "supergroup name:",
+        "shard/server:",
+        "base code:",
+        "category to list base in:",
+
+        "your base’s name:",
+        "the shard it is located on:",
+        "the passcode for entry:",
+        "the category your base is entering under:",
+
+        "contributing builders",
+        "additional information",
+        "edited "
+    ]
+
+    lower_chunk = chunk.lower()
+
+    stop_positions = []
+
+    for p in stop_patterns:
+
+        pos = lower_chunk.find(p)
+
+        if pos > 0:
+            stop_positions.append(pos)
+
+    if stop_positions:
+        chunk = chunk[:min(stop_positions)]
+
+    value = clean(chunk)
+
+    value = value.replace("|", " ")
+
+    value = re.sub(r"\s+", " ", value)
+
+    return value.strip()
+
+# =========================================================
+# NORMALIZATION
+# =========================================================
 
 def normalize_code(code):
 
@@ -109,13 +149,19 @@ def normalize_code(code):
 
     code = code.upper().strip()
 
-    m = re.search(r"[A-Z0-9]{2,}-\d+", code)
+    m = re.search(
+        r"[A-Z0-9]{2,}-\d+",
+        code
+    )
 
     if not m:
         return ""
 
     return m.group(0)
 
+# =========================================================
+# VALIDATION
+# =========================================================
 
 def valid_base(data):
 
@@ -127,11 +173,11 @@ def valid_base(data):
     ]
 
     for field in required:
+
         if not data.get(field):
             return False
 
     return True
-
 
 # =========================================================
 # SUPABASE
@@ -139,15 +185,13 @@ def valid_base(data):
 
 def base_exists(base_code):
 
-    url = API_URL
-
     params = {
         "base_code": f"eq.{base_code}",
         "select": "id"
     }
 
     r = requests.get(
-        url,
+        API_URL,
         headers=SUPABASE_HEADERS,
         params=params,
         timeout=30
@@ -160,25 +204,29 @@ def base_exists(base_code):
         return False
 
     try:
+
         data = r.json()
+
         return len(data) > 0
+
     except:
         return False
 
+# =========================================================
+# UPSERT
+# =========================================================
 
 def upsert_base(data):
-
-    url = API_URL
 
     params = {
         "on_conflict": "base_code"
     }
 
     r = requests.post(
-        url,
+        API_URL,
         headers=SUPABASE_HEADERS,
         params=params,
-        json=data,
+        json=[data],
         timeout=60
     )
 
@@ -189,7 +237,6 @@ def upsert_base(data):
 
     return r.status_code < 300
 
-
 # =========================================================
 # SCRAPER
 # =========================================================
@@ -197,6 +244,7 @@ def upsert_base(data):
 def scrape_source(source):
 
     url = source["url"]
+
     fields = source["fields"]
 
     print("============================================================")
@@ -229,17 +277,21 @@ def scrape_source(source):
 
         print(f"FOUND {len(found)} POSTS USING {selector}")
 
-        if found:
-            posts.extend(found)
+        posts.extend(found)
 
-    # remove duplicates
+    # =====================================================
+    # DEDUPE
+    # =====================================================
+
     unique_posts = []
 
     seen = set()
 
     for post in posts:
 
-        text = clean(post.get_text("\n", strip=True))
+        text = clean(
+            post.get_text("\n", strip=True)
+        )
 
         if not text:
             continue
@@ -253,7 +305,11 @@ def scrape_source(source):
 
     print(f"TOTAL RAW POSTS: {len(unique_posts)}")
 
-    total_inserted = 0
+    inserted = 0
+
+    # =====================================================
+    # PARSE
+    # =====================================================
 
     for text in unique_posts:
 
@@ -261,7 +317,10 @@ def scrape_source(source):
 
         for key, label in fields.items():
 
-            value = extract_field(text, label)
+            value = extract_field(
+                text,
+                label
+            )
 
             data[key] = value
 
@@ -269,7 +328,12 @@ def scrape_source(source):
             data.get("base_code", "")
         )
 
+        print("--------------------------------------------------")
+        print("PARSED DATA:")
+        print(data)
+
         if not valid_base(data):
+            print("INVALID ENTRY")
             continue
 
         print("----------------------------------------")
@@ -279,22 +343,23 @@ def scrape_source(source):
         print(data["base_code"])
         print(data["category"])
 
-        exists = base_exists(data["base_code"])
+        exists = base_exists(
+            data["base_code"]
+        )
 
         if exists:
             print("ALREADY EXISTS")
             continue
 
-        inserted = upsert_base(data)
+        ok = upsert_base(data)
 
-        if inserted:
+        if ok:
             print("INSERTED")
-            total_inserted += 1
+            inserted += 1
         else:
             print("INSERT FAILED")
 
-    return total_inserted
-
+    return inserted
 
 # =========================================================
 # MAIN
@@ -313,6 +378,7 @@ def main():
     for source in SOURCES:
 
         try:
+
             inserted = scrape_source(source)
 
             total += inserted
@@ -326,9 +392,10 @@ def main():
 
     print("============================================================")
     print("DONE")
-    print(f"TOTAL UPSERTED: {total}")
+    print("TOTAL UPSERTED:", total)
     print("============================================================")
 
+# =========================================================
 
 if __name__ == "__main__":
     main()
