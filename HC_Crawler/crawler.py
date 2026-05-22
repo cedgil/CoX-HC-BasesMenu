@@ -104,3 +104,6 @@ def crawl_topics():
         print("-", t["title"])
 
     return topics
+
+
+discover_topics = crawl_topics
