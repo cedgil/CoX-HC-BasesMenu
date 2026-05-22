@@ -1,109 +1,206 @@
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
+import re
 
 BASE_FORUM_URL = (
-    "https://forums.homecomingservers.com/forum/30-base-construction/"
+    "https://forums.homecomingservers.com/forum/53-base-construction/"
 )
 
+MIN_YEAR = 2021
+
+MAX_TOPIC_PAGES = 10
+
 HEADERS = {
-    "User-Agent": "HC-Forum-Crawler/1.0"
+    "User-Agent": "HC-BaseCrawler/1.0"
 }
 
+# =========================================================
+# HELPERS
+# =========================================================
 
-def fetch_page(url):
+def extract_year(title):
 
-    r = requests.get(
-        url,
-        headers=HEADERS,
-        timeout=30
-    )
+    m = re.search(r"(20\d{2})", title)
 
-    r.raise_for_status()
+    if not m:
+        return None
 
-    return r.text
+    return int(m.group(1))
 
 
-def extract_topics_from_page(html):
+def looks_like_base_topic(title):
 
-    soup = BeautifulSoup(html, "html.parser")
+    t = title.lower()
+
+    keywords = [
+        "base",
+        "passcode",
+        "showcase",
+        "contest",
+        "sg",
+        "supergroup",
+        "teleport",
+        "teleporter",
+        "hub",
+        "roleplay",
+        "rp",
+        "venue"
+    ]
+
+    return any(k in t for k in keywords)
+
+# =========================================================
+# DISCOVER TOPICS
+# =========================================================
+
+def discover_topics():
 
     topics = []
 
-    seen = set()
+    print("============================================================")
+    print("DISCOVERING TOPICS")
+    print("============================================================")
 
-    # =====================================================
-    # NEW FORUM SELECTORS
-    # =====================================================
+    for forum_page in range(1, 6):
 
-    selectors = [
+        if forum_page == 1:
 
-        "a[data-linktype='link']",
+            url = BASE_FORUM_URL
 
-        ".ipsDataItem_title a",
+        else:
 
-        "a.ipsDataItem_title",
+            url = (
+                BASE_FORUM_URL
+                + f"?page={forum_page}"
+            )
 
-        "h4.ipsDataItem_title a",
+        print(url)
 
-        "article a"
+        try:
 
-    ]
+            r = requests.get(
+                url,
+                headers=HEADERS,
+                timeout=30
+            )
 
-    for selector in selectors:
+            soup = BeautifulSoup(
+                r.text,
+                "html.parser"
+            )
 
-        links = soup.select(selector)
+            links = soup.select(
+                "a[data-linktype='link']"
+            )
 
-        print(f"SELECTOR {selector} -> {len(links)}")
+            for link in links:
 
-        for link in links:
+                href = link.get("href", "")
+                title = link.get_text(" ", strip=True)
 
-            href = link.get("href", "")
+                if not href:
+                    continue
 
-            title = link.get_text(" ", strip=True)
+                if "/topic/" not in href:
+                    continue
 
-            if not href:
-                continue
+                if not looks_like_base_topic(title):
+                    continue
 
-            if "/topic/" not in href:
-                continue
+                year = extract_year(title)
 
-            full_url = urljoin(
-                "https://forums.homecomingservers.com",
+                if year and year < MIN_YEAR:
+                    continue
+
+                full_url = urljoin(
+                    "https://forums.homecomingservers.com",
+                    href
+                )
+
+                topic = {
+                    "title": title,
+                    "url": full_url
+                }
+
+                if topic not in topics:
+
+                    topics.append(topic)
+
+                    print("FOUND TOPIC:")
+                    print(title)
+                    print(full_url)
+                    print()
+
+        except Exception as e:
+
+            print("ERROR:")
+            print(e)
+
+    print("============================================================")
+    print(f"FOUND {len(topics)} TOPICS")
+    print("============================================================")
+
+    return topics
+
+# =========================================================
+# DISCOVER TOPIC PAGES
+# =========================================================
+
+def discover_topic_pages(topic_url):
+
+    pages = [topic_url]
+
+    try:
+
+        r = requests.get(
+            topic_url,
+            headers=HEADERS,
+            timeout=30
+        )
+
+        soup = BeautifulSoup(
+            r.text,
+            "html.parser"
+        )
+
+        pagination_links = soup.select(
+            "a[href*='page=']"
+        )
+
+        max_page = 1
+
+        for a in pagination_links:
+
+            href = a.get("href", "")
+
+            m = re.search(
+                r"page=(\d+)",
                 href
             )
 
-            slug = href.split("/topic/")[-1]
-
-            if slug in seen:
+            if not m:
                 continue
 
-            seen.add(slug)
+            p = int(m.group(1))
 
-            topics.append({
-                "title": title,
-                "url": full_url
-            })
+            if p > max_page:
+                max_page = p
 
-    return topics
+        max_page = min(
+            max_page,
+            MAX_TOPIC_PAGES
+        )
 
+        for p in range(2, max_page + 1):
 
-def crawl_topics():
+            pages.append(
+                topic_url + f"?page={p}"
+            )
 
-    print("============================================================")
-    print("CRAWLING BASE CONSTRUCTION FORUM")
-    print("============================================================")
+    except Exception as e:
 
-    html = fetch_page(BASE_FORUM_URL)
+        print("PAGE DISCOVERY ERROR:")
+        print(e)
 
-    topics = extract_topics_from_page(html)
-
-    print(f"FOUND {len(topics)} TOPICS")
-
-    for t in topics[:10]:
-        print("-", t["title"])
-
-    return topics
-
-
-discover_topics = crawl_topics
+    return pages
