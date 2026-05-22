@@ -7,8 +7,8 @@ import re
 # CONFIG
 # =========================================================
 
-RSS_URL = (
-    "https://forums.homecomingservers.com/forum/53-base-construction.xml/"
+BASE_FORUM_URL = (
+    "https://forums.homecomingservers.com/forum/53-base-construction/"
 )
 
 HEADERS = {
@@ -19,9 +19,9 @@ HEADERS = {
     )
 }
 
-MIN_YEAR = 2021
+MAX_FORUM_PAGES = 5
 
-MAX_TOPIC_PAGES = 10
+MIN_YEAR = 2021
 
 # =========================================================
 # HELPERS
@@ -64,67 +64,95 @@ def looks_like_base_topic(title):
 def discover_topics():
 
     print("============================================================")
-    print("DISCOVERING TOPICS FROM RSS")
+    print("DISCOVERING TOPICS")
     print("============================================================")
 
     found = []
+    seen = set()
 
-    try:
+    for page in range(1, MAX_FORUM_PAGES + 1):
 
-        r = requests.get(
-            RSS_URL,
-            headers=HEADERS,
-            timeout=30
-        )
+        if page == 1:
+            url = BASE_FORUM_URL
+        else:
+            url = f"{BASE_FORUM_URL}?page={page}"
 
-        print("RSS STATUS:", r.status_code)
+        print(url)
 
-        soup = BeautifulSoup(
-            r.text,
-            "html.parser"
-        )
+        try:
 
-        items = soup.find_all("item")
+            r = requests.get(
+                url,
+                headers=HEADERS,
+                timeout=30
+            )
 
-        print(f"RSS ITEMS: {len(items)}")
+            print("STATUS:", r.status_code)
 
-        for item in items:
+            soup = BeautifulSoup(
+                r.text,
+                "html.parser"
+            )
 
-            title_tag = item.find("title")
-            link_tag = item.find("link")
+            # =====================================================
+            # IPS topic links
+            # =====================================================
 
-            if not title_tag or not link_tag:
-                continue
+            links = soup.select("a[href*='/topic/']")
 
-            title = title_tag.text.strip()
-            url = link_tag.text.strip()
+            print("RAW TOPIC LINKS:", len(links))
 
-            if not looks_like_base_topic(title):
-                continue
+            for a in links:
 
-            year = extract_year(title)
+                href = a.get("href")
 
-            if year and year < MIN_YEAR:
-                continue
+                if not href:
+                    continue
 
-            topic = {
-                "title": title,
-                "url": url
-            }
+                full_url = urljoin(
+                    "https://forums.homecomingservers.com",
+                    href
+                )
 
-            if topic not in found:
+                title = a.get_text(
+                    strip=True
+                )
+
+                if not title:
+                    continue
+
+                if not looks_like_base_topic(title):
+                    continue
+
+                year = extract_year(title)
+
+                if year and year < MIN_YEAR:
+                    continue
+
+                # remove page params
+                full_url = full_url.split("?")[0]
+
+                if full_url in seen:
+                    continue
+
+                seen.add(full_url)
+
+                topic = {
+                    "title": title,
+                    "url": full_url
+                }
 
                 found.append(topic)
 
                 print("FOUND TOPIC")
                 print(title)
-                print(url)
+                print(full_url)
                 print()
 
-    except Exception as e:
+        except Exception as e:
 
-        print("RSS ERROR")
-        print(e)
+            print("DISCOVERY ERROR")
+            print(e)
 
     print("============================================================")
     print(f"FOUND {len(found)} TOPICS")
@@ -148,20 +176,32 @@ def discover_topic_pages(topic_url):
             timeout=30
         )
 
-        html = r.text
-
-        page_numbers = re.findall(
-            r"[?&]page=(\d+)",
-            html
+        soup = BeautifulSoup(
+            r.text,
+            "html.parser"
         )
 
         max_page = 1
 
-        for p in page_numbers:
+        page_links = soup.select(
+            "a[href*='page=']"
+        )
+
+        for a in page_links:
+
+            href = a.get("href", "")
+
+            m = re.search(
+                r"page=(\d+)",
+                href
+            )
+
+            if not m:
+                continue
 
             try:
 
-                p = int(p)
+                p = int(m.group(1))
 
                 if p > max_page:
                     max_page = p
@@ -169,17 +209,14 @@ def discover_topic_pages(topic_url):
             except:
                 pass
 
-        max_page = min(
-            max_page,
-            MAX_TOPIC_PAGES
-        )
+        max_page = min(max_page, 10)
 
         print(f"TOPIC PAGES: {max_page}")
 
         for p in range(2, max_page + 1):
 
             pages.append(
-                topic_url + f"?page={p}"
+                f"{topic_url}?page={p}"
             )
 
     except Exception as e:
