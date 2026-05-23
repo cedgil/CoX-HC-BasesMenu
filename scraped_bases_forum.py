@@ -49,7 +49,7 @@ SOURCES = [
     },
 
     {
-        "url": "https://forums.homecomingservers.com/topic/57844-community-challenge-contest-pride-through-the-ages/#comment-730286",
+        "url": "https://forums.homecomingservers.com/topic/57844-community-challenge-contest-pride-through-the-ages/",
         "event_name": "2025 Pride through the age",
         "event_type": "contest",
         "fields": {
