@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 SUPABASE_URL = os.environ["SUPABASE_URL"].rstrip("/")
 SUPABASE_KEY = os.environ["SUPABASE_KEY"]
 
-SUPABASE_TABLE = "scraped_bases_forum"
+SUPABASE_TABLE = "scraped_forum_bases"
 
 NOW = datetime.now(timezone.utc)
 
@@ -26,6 +26,9 @@ SOURCES = [
 
     {
         "url": "https://forums.homecomingservers.com/topic/62785-list-your-base-for-the-noncompetitive-our-based-showcase/",
+        "event_name": "Noncompetitive Base Showcase",
+        "event_type": "showcase",
+
         "fields": {
             "supergroup_name": "Supergroup Name:",
             "shard": "Shard/Server:",
@@ -36,6 +39,9 @@ SOURCES = [
 
     {
         "url": "https://forums.homecomingservers.com/topic/56486-2025-homecoming-base-contest-rules-entries-thread/",
+        "event_name": "2025 Homecoming Base Contest",
+        "event_type": "contest",
+
         "fields": {
             "supergroup_name": "Your base’s name:",
             "shard": "The shard it is located on:",
@@ -46,6 +52,9 @@ SOURCES = [
 
     {
         "url": "https://forums.homecomingservers.com/topic/39881-2023-homecoming-base-contest-rules-entries-thread/",
+        "event_name": "2023 Homecoming Base Contest",
+        "event_type": "contest",
+
         "fields": {
             "supergroup_name": "Base or SG Name:",
             "shard": "Shard:",
@@ -61,6 +70,7 @@ SOURCES = [
 # =========================================================
 
 SERVER_MAP = {
+
     "torch": "Torchbearer",
     "torchbearer": "Torchbearer",
 
@@ -93,11 +103,11 @@ else:
 
 API_URL = f"{REST_BASE_URL}/{SUPABASE_TABLE}"
 
-print("============================================================")
+print("=" * 60)
 print("SUPABASE DEBUG")
-print("============================================================")
+print("=" * 60)
 print(f"API_URL = {API_URL}")
-print("============================================================")
+print("=" * 60)
 
 # =========================================================
 # HELPERS
@@ -177,6 +187,7 @@ def sanitize_category(category):
     category = clean(category)
 
     STOP_WORDS = [
+
         "Contributing builders",
         "Any additional information",
         "Special or Hidden Features",
@@ -194,10 +205,6 @@ def sanitize_category(category):
             category = category[:idx].strip()
 
     category = re.sub(r"\s+\d+$", "", category)
-
-    category = category.replace("Fantasy /", "Fantasy")
-    category = category.replace("Tech /", "Tech")
-    category = category.replace("Other /", "Other")
 
     if category.lower().startswith("where does this fit?"):
         category = category.split("?")[-1].strip()
@@ -260,26 +267,26 @@ def extract_post_date(article):
         or time_el.get("title")
     )
 
-    if not value:
-        return None
-
     return value
 
 
 def extract_author(article):
 
-    candidates = [
+    selectors = [
         ".ipsType_break",
         ".cAuthorPane_author",
         ".ipsComment_author"
     ]
 
-    for selector in candidates:
+    for selector in selectors:
 
         el = article.select_one(selector)
 
         if el:
-            value = clean(el.get_text(" ", strip=True))
+
+            value = clean(
+                el.get_text(" ", strip=True)
+            )
 
             if value:
                 return value
@@ -300,6 +307,7 @@ def get_total_pages(soup):
         m = re.search(r"page=(\d+)", href)
 
         if m:
+
             page = int(m.group(1))
 
             if page > max_page:
@@ -317,8 +325,28 @@ def get_page_url(base_url, page):
 
     return f"{base_url}{separator}page={page}"
 
+
+def is_template_post(raw_post):
+
+    checks = [
+
+        "Category to list base in:",
+        "The category your base is entering under:",
+        "Passcode:",
+        "Base Code:"
+    ]
+
+    score = 0
+
+    for c in checks:
+
+        if c in raw_post:
+            score += 1
+
+    return score >= 3 and len(raw_post) < 1500
+
 # =========================================================
-# SUPABASE REQUESTS
+# SUPABASE
 # =========================================================
 
 def headers():
@@ -332,8 +360,6 @@ def headers():
 
 def base_exists(code):
 
-    url = API_URL
-
     params = {
         "select": "id",
         "base_code": f"eq.{code}",
@@ -341,7 +367,7 @@ def base_exists(code):
     }
 
     r = requests.get(
-        url,
+        API_URL,
         headers=headers(),
         params=params,
         timeout=30
@@ -350,25 +376,31 @@ def base_exists(code):
     if r.status_code != 200:
         return False
 
-    data = r.json()
-
-    return len(data) > 0
+    return len(r.json()) > 0
 
 
 def insert_base(data):
 
     payload = {
+
+        "event_name": data["event_name"],
+        "event_type": data["event_type"],
+
         "source_topic": data["source_topic"],
         "source_url": data["source_url"],
         "source_page": data["source_page"],
+
         "post_author": data["post_author"],
         "post_date": data["post_date"],
+
         "supergroup_name": data["supergroup_name"],
         "shard": data["shard"],
         "base_code": data["base_code"],
         "category": data["category"],
         "description": data["description"],
+
         "raw_post": data["raw_post"],
+
         "scraped_at": NOW.isoformat()
     }
 
@@ -382,7 +414,8 @@ def insert_base(data):
     print(f"INSERT STATUS: {r.status_code}")
 
     if r.status_code >= 400:
-        print(f"INSERT RESPONSE: {r.text}")
+
+        print(r.text)
         return False
 
     return True
@@ -400,20 +433,16 @@ def scrape_source(source):
 
     topic_url = source["url"]
 
-    print("============================================================")
+    print("=" * 60)
     print("SCRAPING")
     print(topic_url)
-    print("============================================================")
+    print("=" * 60)
 
     r = requests.get(
         topic_url,
-        headers={
-            "User-Agent": "Mozilla/5.0"
-        },
+        headers={"User-Agent": "Mozilla/5.0"},
         timeout=60
     )
-
-    r.raise_for_status()
 
     soup = BeautifulSoup(r.text, "html.parser")
 
@@ -425,20 +454,16 @@ def scrape_source(source):
 
         page_url = get_page_url(topic_url, page)
 
-        print("--------------------------------------------------")
+        print("-" * 50)
         print(f"PAGE {page}")
         print(page_url)
-        print("--------------------------------------------------")
+        print("-" * 50)
 
         r = requests.get(
             page_url,
-            headers={
-                "User-Agent": "Mozilla/5.0"
-            },
+            headers={"User-Agent": "Mozilla/5.0"},
             timeout=60
         )
-
-        r.raise_for_status()
 
         soup = BeautifulSoup(r.text, "html.parser")
 
@@ -455,6 +480,9 @@ def scrape_source(source):
             if not raw_post:
                 continue
 
+            if is_template_post(raw_post):
+                continue
+
             parsed = {}
 
             for key, label in source["fields"].items():
@@ -465,18 +493,22 @@ def scrape_source(source):
 
             if not parsed.get("shard"):
 
-                inferred_server = extract_server_from_text(raw_post)
+                inferred = extract_server_from_text(raw_post)
 
-                if inferred_server:
-                    parsed["shard"] = inferred_server
+                if inferred:
+                    parsed["shard"] = inferred
 
-            parsed["shard"] = normalize_server(parsed.get("shard"))
+            parsed["shard"] = normalize_server(
+                parsed.get("shard")
+            )
 
             parsed["category"] = sanitize_category(
                 parsed.get("category")
             )
 
-            parsed["description"] = extract_description(raw_post)
+            parsed["description"] = extract_description(
+                raw_post
+            )
 
             parsed["post_author"] = extract_author(article)
 
@@ -491,6 +523,9 @@ def scrape_source(source):
                 .split("/topic/")[1]
                 .split("/")[0]
             )
+
+            parsed["event_name"] = source["event_name"]
+            parsed["event_type"] = source["event_type"]
 
             parsed["raw_post"] = raw_post
 
@@ -523,21 +558,12 @@ def scrape_source(source):
             ):
                 continue
 
-            print("--------------------------------------------------")
-            print("PARSED DATA:")
             print(parsed)
 
             if base_exists(parsed["base_code"]):
 
                 print("ALREADY EXISTS")
                 continue
-
-            print("----------------------------------------")
-            print("BASE FOUND")
-            print(parsed["supergroup_name"])
-            print(parsed["shard"])
-            print(parsed["base_code"])
-            print(parsed["category"])
 
             inserted = insert_base(parsed)
 
@@ -557,10 +583,10 @@ def main():
 
         scrape_source(source)
 
-    print("============================================================")
+    print("=" * 60)
     print("DONE")
     print(f"TOTAL UPSERTED: {TOTAL_UPSERTED}")
-    print("============================================================")
+    print("=" * 60)
 
 
 if __name__ == "__main__":
