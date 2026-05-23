@@ -1,12 +1,15 @@
 import json
 import os
 import smtplib
+import sys
+from pathlib import Path
 from email.mime.text import MIMEText
 
 import requests
 from bs4 import BeautifulSoup
 
-FORUM_URL = "https://forums.homecomingservers.com/forum/30-base-construction/"
+CURRENT_DIR = Path(__file__).parent
+sys.path.append(str(CURRENT_DIR))
 
 from keywords import KEYWORDS
 
