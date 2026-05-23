@@ -83,35 +83,52 @@ def send_email(subject, body):
 def fetch_topics():
     all_topics = []
 
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0 Safari/537.36"
+        )
+    }
+
     for forum in FORUMS:
         forum_name = forum["name"]
         forum_url = forum["url"]
 
         print(f"Fetching: {forum_name}")
 
-        response = requests.get(forum_url, timeout=30)
+        response = requests.get(
+            forum_url,
+            headers=headers,
+            timeout=30
+        )
+
         response.raise_for_status()
+
+        print(f"HTTP status: {response.status_code}")
 
         soup = BeautifulSoup(response.text, "html.parser")
 
-        for topic in soup.select("li.ipsDataItem"):
-            title_link = topic.select_one("a[data-linktype='link']")
+        topic_links = soup.select("a[data-linktype='link']")
 
-            if not title_link:
+        print(f"Found links: {len(topic_links)}")
+
+        for link_tag in topic_links:
+            title = link_tag.get_text(strip=True)
+            link = link_tag.get("href")
+
+            if not title or not link:
                 continue
 
-            title = title_link.get_text(strip=True)
-            link = title_link.get("href")
-
-            if not link:
+            if "/topic/" not in link:
                 continue
 
             summary = ""
 
-            snippet = topic.select_one(".ipsDataItem_meta")
+            parent = link_tag.parent
 
-            if snippet:
-                summary = snippet.get_text(" ", strip=True)
+            if parent:
+                summary = parent.get_text(" ", strip=True)
 
             all_topics.append({
                 "forum": forum_name,
@@ -119,6 +136,8 @@ def fetch_topics():
                 "link": link,
                 "summary": summary,
             })
+
+            print(f"Topic found: {title}")
 
     return all_topics
 
