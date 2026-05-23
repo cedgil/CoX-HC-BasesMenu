@@ -249,10 +249,27 @@ def sanitize_category(category):
     return clean(category)
 
 
+# =========================================================
+# RELAXED FIELD EXTRACTION
+# Handles:
+# Shard:
+# S hard:
+# S h a r d :
+# =========================================================
+
 def extract_field(raw_text, label):
 
+    relaxed_label = ""
+
+    for char in label:
+
+        if char.isalpha():
+            relaxed_label += char + r"\s*"
+        else:
+            relaxed_label += re.escape(char)
+
     pattern = (
-        re.escape(label)
+        relaxed_label
         + r"\s*(.*?)"
         + r"(?=\n[A-Z][^\n]{1,80}:|\Z)"
     )
