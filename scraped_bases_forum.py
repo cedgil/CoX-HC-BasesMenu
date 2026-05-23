@@ -14,7 +14,7 @@ from datetime import datetime, timezone, timedelta
 SUPABASE_URL = os.environ["SUPABASE_URL"].rstrip("/")
 SUPABASE_KEY = os.environ["SUPABASE_KEY"]
 
-SUPABASE_TABLE = "scraped_forum_bases"
+SUPABASE_TABLE = "scraped_bases_forum"
 
 NOW = datetime.now(timezone.utc)
 
@@ -48,15 +48,14 @@ SOURCES = [
         }
     },
 
-        {
+    {
         "url": "https://forums.homecomingservers.com/topic/57844-community-challenge-contest-pride-through-the-ages/#comment-730286",
         "event_name": "2025 Pride through the age",
         "event_type": "contest",
         "fields": {
             "supergroup_name": "Base or SG Name:",
             "shard": "Shard:",
-            "base_code": "Passcode:",
-
+            "base_code": "Passcode:"
         }
     },
 
@@ -75,70 +74,58 @@ SOURCES = [
 ]
 
 # =========================================================
-# VALID SERVERS
+# VALID SHARDS
 # =========================================================
 
-VALID_SHARDS = [
-    "Torchbearer",
+VALID_SHARDS = {
     "Excelsior",
+    "Torchbearer",
     "Everlasting",
     "Indomitable",
     "Reunion",
     "Victory"
-]
+}
 
 SERVER_MAP = {
-
     "torch": "Torchbearer",
     "torchbearer": "Torchbearer",
-
     "excel": "Excelsior",
     "excelsior": "Excelsior",
-
     "ever": "Everlasting",
     "everlasting": "Everlasting",
-
+    "reunion": "Reunion",
     "indom": "Indomitable",
     "indomitable": "Indomitable",
-
-    "reunion": "Reunion",
-
     "victory": "Victory"
 }
 
 # =========================================================
-# SUPABASE URL
+# SUPABASE
 # =========================================================
 
 if "/rest/v1/" in SUPABASE_URL:
-
-    REST_BASE_URL = (
-        SUPABASE_URL
-        .split("/rest/v1")[0]
-        + "/rest/v1"
-    )
+    REST_BASE_URL = SUPABASE_URL.split("/rest/v1")[0] + "/rest/v1"
 
 elif SUPABASE_URL.endswith("/rest/v1"):
-
     REST_BASE_URL = SUPABASE_URL
 
 else:
-
     REST_BASE_URL = SUPABASE_URL + "/rest/v1"
 
 API_URL = f"{REST_BASE_URL}/{SUPABASE_TABLE}"
 
-print("============================================================")
-print("SUPABASE DEBUG")
-print("============================================================")
-print(f"SUPABASE_URL = {SUPABASE_URL}")
-print(f"REST_BASE_URL = {REST_BASE_URL}")
-print(f"API_URL = {API_URL}")
-print("============================================================")
-
 # =========================================================
 # HELPERS
 # =========================================================
+
+def headers():
+
+    return {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "resolution=merge-duplicates"
+    }
 
 def clean(text):
 
@@ -149,7 +136,6 @@ def clean(text):
     text = re.sub(r"\s+", " ", text)
 
     return text.strip()
-
 
 def clean_multiline(text):
 
@@ -170,7 +156,6 @@ def clean_multiline(text):
 
     return "\n".join(lines).strip()
 
-
 def normalize_server(value):
 
     if not value:
@@ -190,22 +175,6 @@ def normalize_server(value):
 
     return value.title()
 
-
-def extract_server_from_text(text):
-
-    lower = text.lower()
-
-    for key, normalized in SERVER_MAP.items():
-
-        if f"all on {key}" in lower:
-            return normalized
-
-        if f"on {key}" in lower:
-            return normalized
-
-    return None
-
-
 def sanitize_category(category):
 
     if not category:
@@ -213,14 +182,18 @@ def sanitize_category(category):
 
     category = clean(category)
 
-    STOP_WORDS = [
+    if category.lower().startswith("where does this fit?"):
+        category = category.split("?")[-1].strip()
 
+    category = category.replace("Sci/Tech", "Tech Sci-Fi")
+    category = category.replace("Sci-Fi", "Tech Sci-Fi")
+    category = category.replace("Clubs and Venues", "Clubs and Venues")
+
+    STOP_WORDS = [
+        "Other associated",
         "Contributing builders",
-        "Other associated contributors",
-        "Any additional information",
         "Additional Info",
         "Special or Hidden Features",
-        "Is flight or teleportation",
         "Description",
         "Edited",
         "Posted"
@@ -233,14 +206,7 @@ def sanitize_category(category):
         if idx > 0:
             category = category[:idx].strip()
 
-    category = re.sub(r"\s+\d+$", "", category)
-
-    if category.lower().startswith("where does this fit?"):
-
-        category = category.split("?")[-1].strip()
-
     return clean(category)
-
 
 def extract_field(raw_text, label):
 
@@ -265,7 +231,6 @@ def extract_field(raw_text, label):
 
     return value
 
-
 def extract_description(raw_text):
 
     match = re.search(
@@ -277,53 +242,7 @@ def extract_description(raw_text):
     if not match:
         return None
 
-    desc = clean(match.group(1))
-
-    if not desc:
-        return None
-
-    return desc
-
-
-def extract_post_date(article):
-
-    time_el = article.select_one("time")
-
-    if not time_el:
-        return None
-
-    value = (
-        time_el.get("datetime")
-        or time_el.get("title")
-    )
-
-    return value
-
-
-def extract_author(article):
-
-    candidates = [
-
-        ".ipsType_break",
-        ".cAuthorPane_author",
-        ".ipsComment_author"
-    ]
-
-    for selector in candidates:
-
-        el = article.select_one(selector)
-
-        if el:
-
-            value = clean(
-                el.get_text(" ", strip=True)
-            )
-
-            if value:
-                return value
-
-    return None
-
+    return clean(match.group(1))
 
 def get_total_pages(soup):
 
@@ -338,14 +257,9 @@ def get_total_pages(soup):
         m = re.search(r"page=(\d+)", href)
 
         if m:
-
-            page = int(m.group(1))
-
-            if page > max_page:
-                max_page = page
+            max_page = max(max_page, int(m.group(1)))
 
     return max_page
-
 
 def get_page_url(base_url, page):
 
@@ -360,45 +274,19 @@ def get_page_url(base_url, page):
 # SUPABASE
 # =========================================================
 
-def headers():
-
-    return {
-
-        "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
-        "Content-Type": "application/json",
-        "Prefer": "resolution=merge-duplicates"
-    }
-
-
 def upsert_base(data):
 
     payload = {
-
-        "source_topic": data["source_topic"],
-        "source_url": data["source_url"],
-        "source_page": data["source_page"],
-
-        "event_name": data["event_name"],
-        "event_type": data["event_type"],
-
-        "post_author": data["post_author"],
-        "post_date": data["post_date"],
-
-        "supergroup_name": data["supergroup_name"],
-        "shard": data["shard"],
-        "base_code": data["base_code"],
-        "category": data["category"],
-
-        "description": data["description"],
-        "raw_post": data["raw_post"],
-
+        **data,
         "scraped_at": NOW.isoformat()
     }
 
     r = requests.post(
         API_URL,
-        headers=headers(),
+        headers={
+            **headers(),
+            "Prefer": "resolution=merge-duplicates"
+        },
         params={
             "on_conflict": "base_code"
         },
@@ -409,52 +297,25 @@ def upsert_base(data):
     print(f"UPSERT STATUS: {r.status_code}")
 
     if r.status_code >= 400:
-
         print(r.text)
         return False
 
     return True
 
-
 def purge_old_bases():
 
-    print("============================================================")
-    print("PURGING OLD BASES")
-    print("============================================================")
-
-    active_topics = []
-
-    for source in SOURCES:
-
-        topic = (
-            source["url"]
-            .split("/topic/")[1]
-            .split("/")[0]
-        )
-
-        active_topics.append(topic)
-
-    cutoff = (
+    threshold = (
         NOW - timedelta(days=30)
     ).isoformat()
 
-    params = {
-
-        "source_topic": f"not.in.({','.join(active_topics)})",
-        "scraped_at": f"lt.{cutoff}"
-    }
-
-    r = requests.delete(
+    requests.delete(
         API_URL,
         headers=headers(),
-        params=params,
+        params={
+            "scraped_at": f"lt.{threshold}"
+        },
         timeout=60
     )
-
-    print(f"PURGE STATUS: {r.status_code}")
-
-    if r.status_code >= 400:
-        print(r.text)
 
 # =========================================================
 # SCRAPER
@@ -462,17 +323,13 @@ def purge_old_bases():
 
 TOTAL_UPSERTED = 0
 
-
 def scrape_source(source):
 
     global TOTAL_UPSERTED
 
     topic_url = source["url"]
 
-    print("============================================================")
-    print("SCRAPING")
-    print(topic_url)
-    print("============================================================")
+    print("SCRAPING", topic_url)
 
     r = requests.get(
         topic_url,
@@ -482,22 +339,13 @@ def scrape_source(source):
         timeout=60
     )
 
-    r.raise_for_status()
-
     soup = BeautifulSoup(r.text, "html.parser")
 
     total_pages = get_total_pages(soup)
 
-    print(f"TOTAL PAGES: {total_pages}")
-
     for page in range(1, total_pages + 1):
 
         page_url = get_page_url(topic_url, page)
-
-        print("--------------------------------------------------")
-        print(f"PAGE {page}")
-        print(page_url)
-        print("--------------------------------------------------")
 
         r = requests.get(
             page_url,
@@ -507,13 +355,9 @@ def scrape_source(source):
             timeout=60
         )
 
-        r.raise_for_status()
-
         soup = BeautifulSoup(r.text, "html.parser")
 
         articles = soup.select("article")
-
-        print(f"FOUND {len(articles)} ARTICLES")
 
         for article in articles:
 
@@ -521,23 +365,14 @@ def scrape_source(source):
                 article.get_text("\n", strip=True)
             )
 
-            if not raw_post:
-                continue
-
             parsed = {}
 
             for key, label in source["fields"].items():
 
-                value = extract_field(raw_post, label)
-
-                parsed[key] = value
-
-            if not parsed.get("shard"):
-
-                inferred_server = extract_server_from_text(raw_post)
-
-                if inferred_server:
-                    parsed["shard"] = inferred_server
+                parsed[key] = extract_field(
+                    raw_post,
+                    label
+                )
 
             parsed["shard"] = normalize_server(
                 parsed.get("shard")
@@ -547,49 +382,39 @@ def scrape_source(source):
                 parsed.get("category")
             )
 
-            # =====================================================
-            # CATEGORY FALLBACK
-            # =====================================================
-
             if (
-                (
-                    not parsed.get("category")
-                    or parsed["category"].strip() == ""
-                )
-                and source["event_type"] == "contest"
+                source["event_type"] == "contest"
+                and not parsed.get("category")
             ):
-
                 parsed["category"] = "Thematic Contest"
 
             parsed["description"] = extract_description(raw_post)
 
-            parsed["post_author"] = extract_author(article)
-
-            parsed["post_date"] = extract_post_date(article)
-
             parsed["source_url"] = page_url
-
             parsed["source_page"] = page
-
             parsed["source_topic"] = (
                 topic_url
                 .split("/topic/")[1]
                 .split("/")[0]
             )
 
-            parsed["raw_post"] = raw_post
-
             parsed["event_name"] = source["event_name"]
-
             parsed["event_type"] = source["event_type"]
 
-            if not parsed.get("supergroup_name"):
+            parsed["raw_post"] = raw_post
+
+            # =====================================================
+            # TEMPLATE FILTERS
+            # =====================================================
+
+            if parsed.get("supergroup_name") in [
+                "Supergroup Name:",
+                "Base or SG Name:",
+                "Your base’s name:"
+            ]:
                 continue
 
-            if not parsed.get("shard"):
-                continue
-
-            if parsed["shard"] not in VALID_SHARDS:
+            if parsed.get("shard") not in VALID_SHARDS:
                 continue
 
             if not parsed.get("base_code"):
@@ -599,16 +424,6 @@ def scrape_source(source):
                 parsed["base_code"]
             )
 
-            parsed["base_code"] = (
-                parsed["base_code"]
-                .split(" ")[0]
-                .strip()
-            )
-
-            # =====================================================
-            # STRICT BASE CODE VALIDATION
-            # =====================================================
-
             if not re.match(
                 r"^[A-Z0-9]+-[0-9]+$",
                 parsed["base_code"],
@@ -616,41 +431,13 @@ def scrape_source(source):
             ):
                 continue
 
-            # =====================================================
-            # TEMPLATE FILTER
-            # =====================================================
-
-            template_values = [
-
-                "Shard/Server",
-                "Base Code",
-                "Category to list base in",
-                "Passcode",
-                "Shard",
-                "Category for Contest"
-            ]
-
-            if (
-                parsed["shard"] in template_values
-                or parsed["base_code"] in template_values
-                or (
-                    parsed.get("category")
-                    and parsed["category"] in template_values
-                )
-            ):
-                continue
-
-            print("--------------------------------------------------")
             print("PARSED DATA:")
             print(parsed)
 
             inserted = upsert_base(parsed)
 
             if inserted:
-
                 TOTAL_UPSERTED += 1
-
-                print("UPSERTED")
 
 # =========================================================
 # MAIN
@@ -659,16 +446,12 @@ def scrape_source(source):
 def main():
 
     for source in SOURCES:
-
         scrape_source(source)
 
     purge_old_bases()
 
-    print("============================================================")
     print("DONE")
-    print(f"TOTAL UPSERTED: {TOTAL_UPSERTED}")
-    print("============================================================")
-
+    print(TOTAL_UPSERTED)
 
 if __name__ == "__main__":
     main()
