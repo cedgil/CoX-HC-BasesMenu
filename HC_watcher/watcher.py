@@ -12,6 +12,7 @@ CURRENT_DIR = Path(__file__).parent
 sys.path.append(str(CURRENT_DIR))
 
 from keywords import KEYWORDS
+from forums import FORUMS
 
 KEYWORDS = [k.lower() for k in KEYWORDS]
 
@@ -79,31 +80,38 @@ def send_email(subject, body):
 
 
 def fetch_topics():
-    response = requests.get(FORUM_URL, timeout=30)
-    response.raise_for_status()
+    all_topics = []
 
-    soup = BeautifulSoup(response.text, "html.parser")
+    for forum in FORUMS:
+        forum_name = forum["name"]
+        forum_url = forum["url"]
 
-    topics = []
+        print(f"Fetching: {forum_name}")
 
-    for topic in soup.select("li.ipsDataItem"):
-        title_link = topic.select_one("a[data-linktype='link']")
+        response = requests.get(forum_url, timeout=30)
+        response.raise_for_status()
 
-        if not title_link:
-            continue
+        soup = BeautifulSoup(response.text, "html.parser")
 
-        title = title_link.get_text(strip=True)
-        link = title_link.get("href")
+        for topic in soup.select("li.ipsDataItem"):
+            title_link = topic.select_one("a[data-linktype='link']")
 
-        if not link:
-            continue
+            if not title_link:
+                continue
 
-        topics.append({
-            "title": title,
-            "link": link,
-        })
+            title = title_link.get_text(strip=True)
+            link = title_link.get("href")
 
-    return topics
+            if not link:
+                continue
+
+            all_topics.append({
+                "forum": forum_name,
+                "title": title,
+                "link": link,
+            })
+
+    return all_topics
 
 
 def topic_matches(title):
@@ -127,6 +135,7 @@ def main():
     for topic in topics:
         title = topic["title"]
         link = topic["link"]
+        forum_name = topic["forum"]
 
         if link in seen_links:
             continue
@@ -140,6 +149,7 @@ def main():
 
             message = (
                 "[Homecoming Forum]\n\n"
+                f"Forum: {forum_name}\n\n"
                 f"Nouveau topic détecté\n\n"
                 f"{title}\n\n"
                 f"{link}"
