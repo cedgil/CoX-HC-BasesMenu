@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import smtplib
 import sys
 from pathlib import Path
@@ -55,7 +56,7 @@ def send_whatsapp(message):
 
     response = requests.get(url, params=params, timeout=30)
 
-    print("WhatsApp status:", response.status_code)
+    print(f"WhatsApp status: {response.status_code}")
 
 
 def send_email(subject, body):
@@ -91,11 +92,15 @@ def fetch_topics():
         )
     }
 
+    topic_pattern = re.compile(
+        r'https://forums\.homecomingservers\.com/topic/(\d+)-([^/"?#]+)'
+    )
+
     for forum in FORUMS:
         forum_name = forum["name"]
         forum_url = forum["url"]
 
-        print(f"Fetching: {forum_name}")
+        print(f"\nFetching: {forum_name}")
 
         response = requests.get(
             forum_url,
@@ -106,29 +111,52 @@ def fetch_topics():
         response.raise_for_status()
 
         print(f"HTTP status: {response.status_code}")
+        print(f"HTML size: {len(response.text)}")
 
-        soup = BeautifulSoup(response.text, "html.parser")
+        matches = topic_pattern.findall(response.text)
 
-        topic_links = soup.select("a[data-linktype='link']")
+        print(f"Regex matches found: {len(matches)}")
 
-        print(f"Found links: {len(topic_links)}")
+        found_links = set()
 
-        for link_tag in topic_links:
-            title = link_tag.get_text(strip=True)
-            link = link_tag.get("href")
+        for topic_id, slug in matches:
+            link = f"https://forums.homecomingservers.com/topic/{topic_id}-{slug}"
 
-            if not title or not link:
+            if link in found_links:
                 continue
 
-            if "/topic/" not in link:
-                continue
+            found_links.add(link)
+
+            title = (
+                slug
+                .replace("-", " ")
+                .title()
+            )
 
             summary = ""
 
-            parent = link_tag.parent
+            try:
+                topic_response = requests.get(
+                    link,
+                    headers=headers,
+                    timeout=30
+                )
 
-            if parent:
-                summary = parent.get_text(" ", strip=True)
+                soup = BeautifulSoup(
+                    topic_response.text,
+                    "html.parser"
+                )
+
+                content = soup.select_one(".ipsType_richText")
+
+                if content:
+                    summary = content.get_text(
+                        " ",
+                        strip=True
+                    )[:500]
+
+            except Exception as e:
+                print(f"Summary fetch error: {e}")
 
             all_topics.append({
                 "forum": forum_name,
@@ -145,14 +173,20 @@ def fetch_topics():
 def topic_matches(title):
     title_lower = title.lower()
 
-    return any(keyword in title_lower for keyword in KEYWORDS)
+    return any(
+        keyword in title_lower
+        for keyword in KEYWORDS
+    )
 
 
 def main():
     print("Fetching forum topics...")
 
     seen_topics = load_seen_topics()
-    seen_links = {topic["link"] for topic in seen_topics}
+    seen_links = {
+        topic["link"]
+        for topic in seen_topics
+    }
 
     topics = fetch_topics()
 
@@ -183,7 +217,9 @@ def main():
         if topic_matches(title):
             total_keyword_matches += 1
 
-            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            now = datetime.now().strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
 
             whatsapp_message = (
                 "[Homecoming Forum]\n\n"
