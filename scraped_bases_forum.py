@@ -271,7 +271,7 @@ def extract_field(raw_text, label):
     pattern = (
         relaxed_label
         + r"\s*(.*?)"
-        + r"(?=\n[A-Z][^\n]{1,80}:|\Z)"
+        + r"(?=\n(?:[A-Z]\s*){2,}[^\n]{0,60}:|\Z)"
     )
 
     match = re.search(
