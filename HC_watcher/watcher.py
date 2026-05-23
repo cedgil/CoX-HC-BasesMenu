@@ -5,7 +5,7 @@ import smtplib
 import sys
 from pathlib import Path
 from email.mime.text import MIMEText
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 import requests
 from bs4 import BeautifulSoup
@@ -26,6 +26,9 @@ WHATSAPP_PHONE = os.getenv("WHATSAPP_PHONE")
 GMAIL_USER = os.getenv("GMAIL_USER")
 GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD")
 EMAIL_TO = os.getenv("EMAIL_TO")
+
+# Ignore les topics trop anciens au premier lancement
+MAX_TOPIC_AGE_DAYS = 7
 
 
 def load_seen_topics():
@@ -81,8 +84,29 @@ def send_email(subject, body):
     print("Email sent")
 
 
+def is_recent_topic(topic_date):
+    if not topic_date:
+        return False
+
+    try:
+        topic_datetime = datetime.fromisoformat(
+            topic_date.replace("Z", "+00:00")
+        )
+
+        now = datetime.now(timezone.utc)
+
+        age = now - topic_datetime
+
+        return age <= timedelta(days=MAX_TOPIC_AGE_DAYS)
+
+    except Exception as e:
+        print(f"Date parse error: {e}")
+        return False
+
+
 def fetch_topics():
     all_topics = []
+    seen_links = set()
 
     headers = {
         "User-Agent": (
@@ -117,15 +141,14 @@ def fetch_topics():
 
         print(f"Regex matches found: {len(matches)}")
 
-        found_links = set()
-
         for topic_id, slug in matches:
             link = f"https://forums.homecomingservers.com/topic/{topic_id}-{slug}"
 
-            if link in found_links:
+            # Anti doublons
+            if link in seen_links:
                 continue
 
-            found_links.add(link)
+            seen_links.add(link)
 
             title = (
                 slug
@@ -134,6 +157,7 @@ def fetch_topics():
             )
 
             summary = ""
+            topic_date = None
 
             try:
                 topic_response = requests.get(
@@ -155,6 +179,14 @@ def fetch_topics():
                         strip=True
                     )[:500]
 
+                time_tag = soup.select_one("time")
+
+                if time_tag:
+                    topic_date = (
+                        time_tag.get("datetime")
+                        or time_tag.get_text(strip=True)
+                    )
+
             except Exception as e:
                 print(f"Summary fetch error: {e}")
 
@@ -163,6 +195,7 @@ def fetch_topics():
                 "title": title,
                 "link": link,
                 "summary": summary,
+                "date": topic_date,
             })
 
             print(f"Topic found: {title}")
@@ -183,6 +216,7 @@ def main():
     print("Fetching forum topics...")
 
     seen_topics = load_seen_topics()
+
     seen_links = {
         topic["link"]
         for topic in seen_topics
@@ -194,6 +228,7 @@ def main():
 
     total_topics_checked = 0
     total_new_topics = 0
+    total_recent_topics = 0
     total_keyword_matches = 0
     whatsapp_sent = 0
     emails_sent = 0
@@ -204,13 +239,24 @@ def main():
         title = topic["title"]
         link = topic["link"]
         forum_name = topic["forum"]
+        topic_date = topic.get("date")
 
+        # Déjà vu
         if link in seen_links:
             continue
 
         total_new_topics += 1
 
-        print(f"New topic detected: {title}")
+        # Ignore vieux topics
+        if not is_recent_topic(topic_date):
+            print(f"Old topic ignored: {title}")
+
+            new_seen.append(topic)
+            continue
+
+        total_recent_topics += 1
+
+        print(f"New recent topic detected: {title}")
 
         new_seen.append(topic)
 
@@ -242,6 +288,7 @@ def main():
 
             print(f"Keyword match: {title}")
 
+            # ENVOI ACTIF
             try:
                 send_whatsapp(whatsapp_message)
                 whatsapp_sent += 1
@@ -262,6 +309,7 @@ def main():
     print("\n========== HC WATCHER DEBUG ==========")
     print(f"Topics checked        : {total_topics_checked}")
     print(f"New topics detected   : {total_new_topics}")
+    print(f"Recent topics         : {total_recent_topics}")
     print(f"Keyword matches       : {total_keyword_matches}")
     print(f"WhatsApp sent         : {whatsapp_sent}")
     print(f"Emails sent           : {emails_sent}")
