@@ -8,13 +8,9 @@ from bs4 import BeautifulSoup
 
 FORUM_URL = "https://forums.homecomingservers.com/forum/30-base-construction/"
 
-KEYWORDS = [
-    keyword.strip().lower()
-    for keyword in os.getenv(
-        "KEYWORDS",
-        "teleporter,lighting,editor,contest"
-    ).split(",")
-]
+from keywords import KEYWORDS
+
+KEYWORDS = [k.lower() for k in KEYWORDS]
 
 SEEN_FILE = "automation/homecoming_watcher/seen_topics.json"
 
