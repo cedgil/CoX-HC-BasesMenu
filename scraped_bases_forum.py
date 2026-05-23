@@ -87,15 +87,21 @@ VALID_SHARDS = {
 }
 
 SERVER_MAP = {
+
     "torch": "Torchbearer",
     "torchbearer": "Torchbearer",
+
     "excel": "Excelsior",
     "excelsior": "Excelsior",
+
     "ever": "Everlasting",
     "everlasting": "Everlasting",
-    "reunion": "Reunion",
+
     "indom": "Indomitable",
     "indomitable": "Indomitable",
+
+    "reunion": "Reunion",
+
     "victory": "Victory"
 }
 
@@ -104,15 +110,28 @@ SERVER_MAP = {
 # =========================================================
 
 if "/rest/v1/" in SUPABASE_URL:
-    REST_BASE_URL = SUPABASE_URL.split("/rest/v1")[0] + "/rest/v1"
+
+    REST_BASE_URL = (
+        SUPABASE_URL
+        .split("/rest/v1")[0]
+        + "/rest/v1"
+    )
 
 elif SUPABASE_URL.endswith("/rest/v1"):
+
     REST_BASE_URL = SUPABASE_URL
 
 else:
+
     REST_BASE_URL = SUPABASE_URL + "/rest/v1"
 
 API_URL = f"{REST_BASE_URL}/{SUPABASE_TABLE}"
+
+print("============================================================")
+print("SUPABASE DEBUG")
+print("============================================================")
+print(f"API_URL = {API_URL}")
+print("============================================================")
 
 # =========================================================
 # HELPERS
@@ -127,6 +146,7 @@ def headers():
         "Prefer": "resolution=merge-duplicates"
     }
 
+
 def clean(text):
 
     if not text:
@@ -136,6 +156,7 @@ def clean(text):
     text = re.sub(r"\s+", " ", text)
 
     return text.strip()
+
 
 def clean_multiline(text):
 
@@ -156,6 +177,7 @@ def clean_multiline(text):
 
     return "\n".join(lines).strip()
 
+
 def normalize_server(value):
 
     if not value:
@@ -175,6 +197,22 @@ def normalize_server(value):
 
     return value.title()
 
+
+def extract_server_from_text(text):
+
+    lower = text.lower()
+
+    for key, normalized in SERVER_MAP.items():
+
+        if f"all on {key}" in lower:
+            return normalized
+
+        if f"on {key}" in lower:
+            return normalized
+
+    return None
+
+
 def sanitize_category(category):
 
     if not category:
@@ -182,18 +220,14 @@ def sanitize_category(category):
 
     category = clean(category)
 
-    if category.lower().startswith("where does this fit?"):
-        category = category.split("?")[-1].strip()
-
-    category = category.replace("Sci/Tech", "Tech Sci-Fi")
-    category = category.replace("Sci-Fi", "Tech Sci-Fi")
-    category = category.replace("Clubs and Venues", "Clubs and Venues")
-
     STOP_WORDS = [
-        "Other associated",
+
         "Contributing builders",
+        "Other associated contributors",
+        "Any additional information",
         "Additional Info",
         "Special or Hidden Features",
+        "Is flight or teleportation",
         "Description",
         "Edited",
         "Posted"
@@ -206,7 +240,14 @@ def sanitize_category(category):
         if idx > 0:
             category = category[:idx].strip()
 
+    category = re.sub(r"\s+\d+$", "", category)
+
+    if category.lower().startswith("where does this fit?"):
+
+        category = category.split("?")[-1].strip()
+
     return clean(category)
+
 
 def extract_field(raw_text, label):
 
@@ -231,6 +272,7 @@ def extract_field(raw_text, label):
 
     return value
 
+
 def extract_description(raw_text):
 
     match = re.search(
@@ -242,7 +284,13 @@ def extract_description(raw_text):
     if not match:
         return None
 
-    return clean(match.group(1))
+    desc = clean(match.group(1))
+
+    if not desc:
+        return None
+
+    return desc
+
 
 def get_total_pages(soup):
 
@@ -257,9 +305,14 @@ def get_total_pages(soup):
         m = re.search(r"page=(\d+)", href)
 
         if m:
-            max_page = max(max_page, int(m.group(1)))
+
+            page = int(m.group(1))
+
+            if page > max_page:
+                max_page = page
 
     return max_page
+
 
 def get_page_url(base_url, page):
 
@@ -271,7 +324,7 @@ def get_page_url(base_url, page):
     return f"{base_url}{separator}page={page}"
 
 # =========================================================
-# SUPABASE
+# SUPABASE REQUESTS
 # =========================================================
 
 def upsert_base(data):
@@ -283,10 +336,7 @@ def upsert_base(data):
 
     r = requests.post(
         API_URL,
-        headers={
-            **headers(),
-            "Prefer": "resolution=merge-duplicates"
-        },
+        headers=headers(),
         params={
             "on_conflict": "base_code"
         },
@@ -297,25 +347,36 @@ def upsert_base(data):
     print(f"UPSERT STATUS: {r.status_code}")
 
     if r.status_code >= 400:
+
         print(r.text)
         return False
 
     return True
 
+
 def purge_old_bases():
 
-    threshold = (
+    print("============================================================")
+    print("PURGING OLD BASES")
+    print("============================================================")
+
+    cutoff = (
         NOW - timedelta(days=30)
     ).isoformat()
 
-    requests.delete(
+    r = requests.delete(
         API_URL,
         headers=headers(),
         params={
-            "scraped_at": f"lt.{threshold}"
+            "scraped_at": f"lt.{cutoff}"
         },
         timeout=60
     )
+
+    print(f"PURGE STATUS: {r.status_code}")
+
+    if r.status_code >= 400:
+        print(r.text)
 
 # =========================================================
 # SCRAPER
@@ -323,13 +384,17 @@ def purge_old_bases():
 
 TOTAL_UPSERTED = 0
 
+
 def scrape_source(source):
 
     global TOTAL_UPSERTED
 
     topic_url = source["url"]
 
-    print("SCRAPING", topic_url)
+    print("============================================================")
+    print("SCRAPING")
+    print(topic_url)
+    print("============================================================")
 
     r = requests.get(
         topic_url,
@@ -339,13 +404,22 @@ def scrape_source(source):
         timeout=60
     )
 
+    r.raise_for_status()
+
     soup = BeautifulSoup(r.text, "html.parser")
 
     total_pages = get_total_pages(soup)
 
+    print(f"TOTAL PAGES: {total_pages}")
+
     for page in range(1, total_pages + 1):
 
         page_url = get_page_url(topic_url, page)
+
+        print("--------------------------------------------------")
+        print(f"PAGE {page}")
+        print(page_url)
+        print("--------------------------------------------------")
 
         r = requests.get(
             page_url,
@@ -355,9 +429,13 @@ def scrape_source(source):
             timeout=60
         )
 
+        r.raise_for_status()
+
         soup = BeautifulSoup(r.text, "html.parser")
 
         articles = soup.select("article")
+
+        print(f"FOUND {len(articles)} ARTICLES")
 
         for article in articles:
 
@@ -365,14 +443,27 @@ def scrape_source(source):
                 article.get_text("\n", strip=True)
             )
 
+            if not raw_post:
+                continue
+
             parsed = {}
 
             for key, label in source["fields"].items():
 
-                parsed[key] = extract_field(
-                    raw_post,
-                    label
-                )
+                value = extract_field(raw_post, label)
+
+                parsed[key] = value
+
+            # =====================================================
+            # SERVER INFERENCE
+            # =====================================================
+
+            if not parsed.get("shard"):
+
+                inferred_server = extract_server_from_text(raw_post)
+
+                if inferred_server:
+                    parsed["shard"] = inferred_server
 
             parsed["shard"] = normalize_server(
                 parsed.get("shard")
@@ -382,16 +473,29 @@ def scrape_source(source):
                 parsed.get("category")
             )
 
+            # =====================================================
+            # FALLBACK CONTEST CATEGORY
+            # =====================================================
+
             if (
                 source["event_type"] == "contest"
-                and not parsed.get("category")
+                and (
+                    not parsed.get("category")
+                    or parsed["category"].lower() in [
+                        "unknown",
+                        "n/a",
+                        "none"
+                    ]
+                )
             ):
                 parsed["category"] = "Thematic Contest"
 
             parsed["description"] = extract_description(raw_post)
 
             parsed["source_url"] = page_url
+
             parsed["source_page"] = page
+
             parsed["source_topic"] = (
                 topic_url
                 .split("/topic/")[1]
@@ -399,22 +503,42 @@ def scrape_source(source):
             )
 
             parsed["event_name"] = source["event_name"]
+
             parsed["event_type"] = source["event_type"]
 
             parsed["raw_post"] = raw_post
 
             # =====================================================
-            # TEMPLATE FILTERS
+            # TEMPLATE FILTER
             # =====================================================
 
-            if parsed.get("supergroup_name") in [
-                "Supergroup Name:",
-                "Base or SG Name:",
-                "Your base’s name:"
-            ]:
+            template_values = [
+
+                "Shard/Server",
+                "Base Code",
+                "Category to list base in",
+                "Passcode",
+                "Shard",
+                "Category for Contest"
+            ]
+
+            if (
+                parsed.get("shard") in template_values
+                or parsed.get("base_code") in template_values
+            ):
                 continue
 
-            if parsed.get("shard") not in VALID_SHARDS:
+            # =====================================================
+            # REQUIRED FIELDS
+            # =====================================================
+
+            if not parsed.get("supergroup_name"):
+                continue
+
+            if not parsed.get("shard"):
+                continue
+
+            if parsed["shard"] not in VALID_SHARDS:
                 continue
 
             if not parsed.get("base_code"):
@@ -424,6 +548,16 @@ def scrape_source(source):
                 parsed["base_code"]
             )
 
+            parsed["base_code"] = (
+                parsed["base_code"]
+                .split(" ")[0]
+                .strip()
+            )
+
+            # =====================================================
+            # STRICT BASE CODE VALIDATION
+            # =====================================================
+
             if not re.match(
                 r"^[A-Z0-9]+-[0-9]+$",
                 parsed["base_code"],
@@ -431,13 +565,17 @@ def scrape_source(source):
             ):
                 continue
 
+            print("--------------------------------------------------")
             print("PARSED DATA:")
             print(parsed)
 
             inserted = upsert_base(parsed)
 
             if inserted:
+
                 TOTAL_UPSERTED += 1
+
+                print("UPSERTED")
 
 # =========================================================
 # MAIN
@@ -446,12 +584,16 @@ def scrape_source(source):
 def main():
 
     for source in SOURCES:
+
         scrape_source(source)
 
     purge_old_bases()
 
+    print("============================================================")
     print("DONE")
-    print(TOTAL_UPSERTED)
+    print(f"TOTAL UPSERTED: {TOTAL_UPSERTED}")
+    print("============================================================")
+
 
 if __name__ == "__main__":
     main()
