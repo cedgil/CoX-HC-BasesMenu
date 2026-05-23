@@ -67,6 +67,7 @@ SOURCES = [
 # =========================================================
 
 SERVER_MAP = {
+
     "torch": "Torchbearer",
     "torchbearer": "Torchbearer",
 
@@ -85,16 +86,38 @@ SERVER_MAP = {
 }
 
 # =========================================================
+# CATEGORY NORMALIZATION
+# =========================================================
+
+CATEGORY_MAP = {
+
+    "rp base under 7k": "RP Base Under 7K",
+    "free form": "Freeform",
+    "freeform": "Freeform",
+    "realism": "Realism",
+    "fantasy": "Fantasy",
+    "tech": "Tech",
+    "novice": "Novice",
+    "clubs and venues": "Clubs and Venues"
+}
+
+# =========================================================
 # SUPABASE
 # =========================================================
 
 if "/rest/v1/" in SUPABASE_URL:
-    REST_BASE_URL = SUPABASE_URL.split("/rest/v1")[0] + "/rest/v1"
+
+    REST_BASE_URL = (
+        SUPABASE_URL.split("/rest/v1")[0]
+        + "/rest/v1"
+    )
 
 elif SUPABASE_URL.endswith("/rest/v1"):
+
     REST_BASE_URL = SUPABASE_URL
 
 else:
+
     REST_BASE_URL = SUPABASE_URL + "/rest/v1"
 
 API_URL = f"{REST_BASE_URL}/{SUPABASE_TABLE}"
@@ -195,7 +218,11 @@ def sanitize_category(category):
     category = clean(category)
 
     STOP_WORDS = [
+
         "Contributing builders",
+        "Other associated contributors",
+        "Other associated contributor",
+        "Additional Info",
         "Any additional information",
         "Special or Hidden Features",
         "Is flight or teleportation",
@@ -213,12 +240,25 @@ def sanitize_category(category):
 
     category = re.sub(r"\s+\d+$", "", category)
 
+    category = category.replace(" 1", "")
+    category = category.replace(" 2", "")
+    category = category.replace(" 3", "")
+
     category = category.replace("Fantasy /", "Fantasy")
     category = category.replace("Tech /", "Tech")
     category = category.replace("Other /", "Other")
 
     if category.lower().startswith("where does this fit?"):
-        category = category.split("?")[-1].strip()
+
+        category = (
+            category.split("?")[-1]
+            .strip()
+        )
+
+    lower = category.lower().strip()
+
+    if lower in CATEGORY_MAP:
+        category = CATEGORY_MAP[lower]
 
     return clean(category)
 
@@ -287,6 +327,7 @@ def extract_post_date(article):
 def extract_author(article):
 
     candidates = [
+
         ".ipsType_break",
         ".cAuthorPane_author",
         ".ipsComment_author"
@@ -297,7 +338,10 @@ def extract_author(article):
         el = article.select_one(selector)
 
         if el:
-            value = clean(el.get_text(" ", strip=True))
+
+            value = clean(
+                el.get_text(" ", strip=True)
+            )
 
             if value:
                 return value
@@ -318,6 +362,7 @@ def get_total_pages(soup):
         m = re.search(r"page=(\d+)", href)
 
         if m:
+
             page = int(m.group(1))
 
             if page > max_page:
@@ -342,19 +387,24 @@ def get_page_url(base_url, page):
 def upsert_base(data):
 
     payload = {
+
         "source_topic": data["source_topic"],
         "source_url": data["source_url"],
         "source_page": data["source_page"],
         "post_author": data["post_author"],
         "post_date": data["post_date"],
+
         "supergroup_name": data["supergroup_name"],
         "shard": data["shard"],
         "base_code": data["base_code"],
         "category": data["category"],
+
         "description": data["description"],
         "raw_post": data["raw_post"],
+
         "event_name": data["event_name"],
         "event_type": data["event_type"],
+
         "scraped_at": NOW.isoformat(),
         "last_seen_at": NOW.isoformat()
     }
@@ -371,7 +421,9 @@ def upsert_base(data):
     print(f"UPSERT STATUS: {r.status_code}")
 
     if r.status_code >= 400:
+
         print(r.text)
+
         return False
 
     return True
@@ -385,7 +437,7 @@ def purge_old_bases():
 
     cutoff = (
         NOW - timedelta(days=30)
-    ).isoformat()
+    ).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     url = (
         API_URL
@@ -476,28 +528,41 @@ def scrape_source(source):
 
             for key, label in source["fields"].items():
 
-                value = extract_field(raw_post, label)
+                value = extract_field(
+                    raw_post,
+                    label
+                )
 
                 parsed[key] = value
 
             if not parsed.get("shard"):
 
-                inferred_server = extract_server_from_text(raw_post)
+                inferred_server = (
+                    extract_server_from_text(raw_post)
+                )
 
                 if inferred_server:
                     parsed["shard"] = inferred_server
 
-            parsed["shard"] = normalize_server(parsed.get("shard"))
+            parsed["shard"] = normalize_server(
+                parsed.get("shard")
+            )
 
             parsed["category"] = sanitize_category(
                 parsed.get("category")
             )
 
-            parsed["description"] = extract_description(raw_post)
+            parsed["description"] = extract_description(
+                raw_post
+            )
 
-            parsed["post_author"] = extract_author(article)
+            parsed["post_author"] = extract_author(
+                article
+            )
 
-            parsed["post_date"] = extract_post_date(article)
+            parsed["post_date"] = extract_post_date(
+                article
+            )
 
             parsed["source_url"] = page_url
 
