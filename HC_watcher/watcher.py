@@ -139,9 +139,15 @@ def main():
 
     new_seen = list(seen_topics)
 
-    found_matches = 0
+    total_topics_checked = 0
+    total_new_topics = 0
+    total_keyword_matches = 0
+    whatsapp_sent = 0
+    emails_sent = 0
 
     for topic in topics:
+        total_topics_checked += 1
+
         title = topic["title"]
         link = topic["link"]
         forum_name = topic["forum"]
@@ -149,12 +155,14 @@ def main():
         if link in seen_links:
             continue
 
-        print("New topic:", title)
+        total_new_topics += 1
+
+        print(f"New topic detected: {title}")
 
         new_seen.append(topic)
 
         if topic_matches(title):
-            found_matches += 1
+            total_keyword_matches += 1
 
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -177,18 +185,32 @@ def main():
                 f"Résumé:\n{topic['summary']}"
             )
 
-            print("Keyword match found")
+            print(f"Keyword match: {title}")
 
-            send_whatsapp(whatsapp_message)
+            try:
+                send_whatsapp(whatsapp_message)
+                whatsapp_sent += 1
+            except Exception as e:
+                print(f"WhatsApp error: {e}")
 
-            send_email(
-                subject=f"Homecoming Alert: {title}",
-                body=email_body
-            )
+            try:
+                send_email(
+                    subject=f"Homecoming Alert: {title}",
+                    body=email_body
+                )
+                emails_sent += 1
+            except Exception as e:
+                print(f"Email error: {e}")
 
     save_seen_topics(new_seen)
 
-    print(f"Done. {found_matches} matching topics found.")
+    print("\n========== HC WATCHER DEBUG ==========")
+    print(f"Topics checked        : {total_topics_checked}")
+    print(f"New topics detected   : {total_new_topics}")
+    print(f"Keyword matches       : {total_keyword_matches}")
+    print(f"WhatsApp sent         : {whatsapp_sent}")
+    print(f"Emails sent           : {emails_sent}")
+    print("======================================\n")
 
 
 if __name__ == "__main__":
