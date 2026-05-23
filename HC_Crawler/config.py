@@ -1,56 +1,40 @@
 import os
 
+# =========================================================
+# SUPABASE
+# =========================================================
+
 SUPABASE_URL = os.environ["SUPABASE_URL"].rstrip("/")
 SUPABASE_KEY = os.environ["SUPABASE_KEY"]
 
-REST_BASE_URL = f"{SUPABASE_URL}/rest/v1"
+# accepte :
+# https://xxx.supabase.co
+# https://xxx.supabase.co/rest/v1
+
+if SUPABASE_URL.endswith("/rest/v1"):
+
+    REST_BASE_URL = SUPABASE_URL
+
+else:
+
+    REST_BASE_URL = f"{SUPABASE_URL}/rest/v1"
+
+# =========================================================
+# TABLE
+# =========================================================
 
 TABLE_NAME = "scraped_forum_bases"
 
-HEADERS = {
-    "apikey": SUPABASE_KEY,
-    "Authorization": f"Bearer {SUPABASE_KEY}",
-    "Content-Type": "application/json"
-}
+API_URL = f"{REST_BASE_URL}/{TABLE_NAME}"
 
-BASE_SECTION_URL = (
-    "https://forums.homecomingservers.com/forum/53-base-construction/"
-)
+# =========================================================
+# DEBUG
+# =========================================================
 
-SHARD_ALIASES = {
-
-    "torch": "Torchbearer",
-    "torchbearer": "Torchbearer",
-
-    "excel": "Excelsior",
-    "excelsior": "Excelsior",
-
-    "ever": "Everlasting",
-    "everlasting": "Everlasting",
-
-    "reunion": "Reunion",
-
-    "indo": "Indomitable",
-    "indomitable": "Indomitable",
-
-    "victory": "Victory"
-}
-
-CATEGORY_MAP = {
-
-    "clubs and venues": "Clubs and Venues",
-    "club": "Clubs and Venues",
-    "venue": "Clubs and Venues",
-
-    "realism": "Realism",
-    "fantasy": "Fantasy",
-    "arcane": "Arcane",
-    "freeform": "Freeform",
-    "novice": "Novice",
-    "nature": "Nature",
-    "tech": "Sci-Tech",
-    "sci": "Sci-Tech",
-    "maze": "Maze",
-    "floating": "Floating Islands",
-    "rp": "RP"
-}
+print("============================================================")
+print("SUPABASE DEBUG")
+print("============================================================")
+print("SUPABASE_URL =", SUPABASE_URL)
+print("REST_BASE_URL =", REST_BASE_URL)
+print("API_URL =", API_URL)
+print("============================================================")
