@@ -26,6 +26,7 @@ SOURCES = [
 
     {
         "url": "https://forums.homecomingservers.com/topic/62785-list-your-base-for-the-noncompetitive-our-based-showcase/",
+
         "event_name": "Noncompetitive Base Showcase",
         "event_type": "showcase",
 
@@ -39,6 +40,7 @@ SOURCES = [
 
     {
         "url": "https://forums.homecomingservers.com/topic/56486-2025-homecoming-base-contest-rules-entries-thread/",
+
         "event_name": "2025 Homecoming Base Contest",
         "event_type": "contest",
 
@@ -52,6 +54,7 @@ SOURCES = [
 
     {
         "url": "https://forums.homecomingservers.com/topic/39881-2023-homecoming-base-contest-rules-entries-thread/",
+
         "event_name": "2023 Homecoming Base Contest",
         "event_type": "contest",
 
