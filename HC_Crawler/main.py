@@ -1,17 +1,8 @@
-from crawler import (
-    discover_topics,
-    discover_topic_pages
-)
-
+from crawler import discover_topics
 from post_scraper import scrape_posts
 from parser import extract_bases
-from supabase import (
-    base_exists,
-    insert_base
-)
+from supabase import upsert_base
 
-# =========================================================
-# MAIN
 # =========================================================
 
 def main():
@@ -32,53 +23,34 @@ def main():
         print(topic["url"])
         print("============================================================")
 
-        pages = discover_topic_pages(
-            topic["url"]
-        )
+        try:
 
-        for page_num, page_url in enumerate(pages, start=1):
-
-            print("SCRAPING PAGE")
-            print(page_num)
-            print(page_url)
-
-            posts = scrape_posts(page_url)
+            posts = scrape_posts(topic["url"])
 
             print(f"FOUND {len(posts)} POSTS")
 
             for post in posts:
 
                 bases = extract_bases(
-                    post_text=post["raw_post"],
+                    post_text=post["content"],
                     topic_title=topic["title"],
                     topic_url=topic["url"],
-                    page_number=page_num,
-                    author=post.get("author")
+                    post_author=post.get("author")
                 )
 
                 for base in bases:
 
                     print(base)
 
-                    if not base.get("base_code"):
-                        continue
-
-                    if base_exists(base["base_code"]):
-
-                        print("ALREADY EXISTS")
-                        continue
-
-                    ok = insert_base(base)
+                    ok = upsert_base(base)
 
                     if ok:
-
                         total += 1
 
-                        print("INSERTED")
+        except Exception as e:
 
-                    else:
-
-                        print("FAILED")
+            print("TOPIC ERROR")
+            print(e)
 
     print("============================================================")
     print("DONE")
