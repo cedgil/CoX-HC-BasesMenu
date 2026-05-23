@@ -17,7 +17,7 @@ from forums import FORUMS
 
 KEYWORDS = [k.lower() for k in KEYWORDS]
 
-SEEN_FILE = "automation/homecoming_watcher/seen_topics.json"
+SEEN_FILE = "HC_watcher/seen_topics.json"
 
 CALLMEBOT_APIKEY = os.getenv("CALLMEBOT_APIKEY")
 WHATSAPP_PHONE = os.getenv("WHATSAPP_PHONE")
