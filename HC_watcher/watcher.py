@@ -4,6 +4,7 @@ import smtplib
 import sys
 from pathlib import Path
 from email.mime.text import MIMEText
+from datetime import datetime
 
 import requests
 from bs4 import BeautifulSoup
@@ -105,10 +106,18 @@ def fetch_topics():
             if not link:
                 continue
 
+            summary = ""
+
+            snippet = topic.select_one(".ipsDataItem_meta")
+
+            if snippet:
+                summary = snippet.get_text(" ", strip=True)
+
             all_topics.append({
                 "forum": forum_name,
                 "title": title,
                 "link": link,
+                "summary": summary,
             })
 
     return all_topics
@@ -147,22 +156,35 @@ def main():
         if topic_matches(title):
             found_matches += 1
 
-            message = (
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            whatsapp_message = (
                 "[Homecoming Forum]\n\n"
+                f"Date: {now}\n\n"
                 f"Forum: {forum_name}\n\n"
                 f"Nouveau topic détecté\n\n"
                 f"{title}\n\n"
                 f"{link}"
             )
 
+            email_body = (
+                "[Homecoming Forum]\n\n"
+                f"Date: {now}\n\n"
+                f"Forum: {forum_name}\n\n"
+                f"Nouveau topic détecté\n\n"
+                f"Titre:\n{title}\n\n"
+                f"Lien:\n{link}\n\n"
+                f"Résumé:\n{topic['summary']}"
+            )
+
             print("Keyword match found")
 
-# send_whatsapp(message)
+            send_whatsapp(whatsapp_message)
 
-# send_email(
-#     subject=f"Homecoming Alert: {title}",
-#     body=message
-# )
+            send_email(
+                subject=f"Homecoming Alert: {title}",
+                body=email_body
+            )
 
     save_seen_topics(new_seen)
 
