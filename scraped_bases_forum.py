@@ -48,6 +48,18 @@ SOURCES = [
         }
     },
 
+        {
+        "url": "https://forums.homecomingservers.com/topic/57844-community-challenge-contest-pride-through-the-ages/#comment-730286",
+        "event_name": "2025 Pride through the age",
+        "event_type": "contest",
+        "fields": {
+            "supergroup_name": "Base or SG Name:",
+            "shard": "Shard:",
+            "base_code": "Passcode:",
+
+        }
+    },
+
     {
         "url": "https://forums.homecomingservers.com/topic/39881-2023-homecoming-base-contest-rules-entries-thread/",
         "event_name": "2023 Base Contest",
