@@ -157,12 +157,12 @@ def main():
 
             print("Keyword match found")
 
-            send_whatsapp(message)
+# send_whatsapp(message)
 
-            send_email(
-                subject=f"Homecoming Alert: {title}",
-                body=message
-            )
+# send_email(
+#     subject=f"Homecoming Alert: {title}",
+#     body=message
+# )
 
     save_seen_topics(new_seen)
 
