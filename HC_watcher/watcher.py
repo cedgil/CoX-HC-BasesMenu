@@ -9,6 +9,7 @@ from datetime import datetime, timezone, timedelta
 
 import requests
 from bs4 import BeautifulSoup
+from twilio.rest import Client
 
 CURRENT_DIR = Path(__file__).parent
 sys.path.append(str(CURRENT_DIR))
@@ -23,11 +24,15 @@ SEEN_FILE = "HC_watcher/seen_topics.json"
 CALLMEBOT_APIKEY = os.getenv("CALLMEBOT_APIKEY")
 WHATSAPP_PHONE = os.getenv("WHATSAPP_PHONE")
 
+TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
+TWOLIO_AUTH_TOKEN = os.getenv("TWOLIO_AUTH_TOKEN")
+TWILIO_WHATSAPP_FROM = os.getenv("TWILIO_WHATSAPP_FROM")
+
 GMAIL_USER = os.getenv("GMAIL_USER")
 GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD")
 EMAIL_TO = os.getenv("EMAIL_TO")
 
-# Ignore les topics trop anciens au premier lancement
+# Ignore les vieux topics lors du premier lancement
 MAX_TOPIC_AGE_DAYS = 7
 
 
@@ -44,9 +49,9 @@ def save_seen_topics(seen_topics):
         json.dump(seen_topics, f, indent=2)
 
 
-def send_whatsapp(message):
+def send_whatsapp_callmebot(message):
     if not CALLMEBOT_APIKEY or not WHATSAPP_PHONE:
-        print("WhatsApp config missing")
+        print("CallMeBot config missing")
         return
 
     url = "https://api.callmebot.com/whatsapp.php"
@@ -57,9 +62,47 @@ def send_whatsapp(message):
         "apikey": CALLMEBOT_APIKEY,
     }
 
-    response = requests.get(url, params=params, timeout=30)
+    response = requests.get(
+        url,
+        params=params,
+        timeout=30
+    )
 
-    print(f"WhatsApp status: {response.status_code}")
+    print(
+        f"CallMeBot WhatsApp status: "
+        f"{response.status_code}"
+    )
+
+
+def send_whatsapp_twilio(message):
+    if not all([
+        TWILIO_ACCOUNT_SID,
+        TWOLIO_AUTH_TOKEN,
+        WHATSAPP_PHONE,
+        TWILIO_WHATSAPP_FROM
+    ]):
+        print("Twilio config missing")
+        return
+
+    try:
+        client = Client(
+            TWILIO_ACCOUNT_SID,
+            TWOLIO_AUTH_TOKEN
+        )
+
+        twilio_message = client.messages.create(
+            body=message,
+            from_=f"whatsapp:{TWILIO_WHATSAPP_FROM}",
+            to=f"whatsapp:{WHATSAPP_PHONE}"
+        )
+
+        print(
+            f"Twilio WhatsApp sent: "
+            f"{twilio_message.sid}"
+        )
+
+    except Exception as e:
+        print(f"Twilio WhatsApp error: {e}")
 
 
 def send_email(subject, body):
@@ -76,9 +119,17 @@ def send_email(subject, body):
     msg["From"] = GMAIL_USER
     msg["To"] = EMAIL_TO
 
-    with smtplib.SMTP("smtp.gmail.com", 587) as server:
+    with smtplib.SMTP(
+        "smtp.gmail.com",
+        587
+    ) as server:
         server.starttls()
-        server.login(GMAIL_USER, GMAIL_APP_PASSWORD)
+
+        server.login(
+            GMAIL_USER,
+            GMAIL_APP_PASSWORD
+        )
+
         server.send_message(msg)
 
     print("Email sent")
@@ -97,7 +148,9 @@ def is_recent_topic(topic_date):
 
         age = now - topic_datetime
 
-        return age <= timedelta(days=MAX_TOPIC_AGE_DAYS)
+        return age <= timedelta(
+            days=MAX_TOPIC_AGE_DAYS
+        )
 
     except Exception as e:
         print(f"Date parse error: {e}")
@@ -110,8 +163,10 @@ def fetch_topics():
 
     headers = {
         "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Mozilla/5.0 "
+            "(Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 "
+            "(KHTML, like Gecko) "
             "Chrome/124.0 Safari/537.36"
         )
     }
@@ -134,15 +189,30 @@ def fetch_topics():
 
         response.raise_for_status()
 
-        print(f"HTTP status: {response.status_code}")
-        print(f"HTML size: {len(response.text)}")
+        print(
+            f"HTTP status: "
+            f"{response.status_code}"
+        )
 
-        matches = topic_pattern.findall(response.text)
+        print(
+            f"HTML size: "
+            f"{len(response.text)}"
+        )
 
-        print(f"Regex matches found: {len(matches)}")
+        matches = topic_pattern.findall(
+            response.text
+        )
+
+        print(
+            f"Regex matches found: "
+            f"{len(matches)}"
+        )
 
         for topic_id, slug in matches:
-            link = f"https://forums.homecomingservers.com/topic/{topic_id}-{slug}"
+            link = (
+                "https://forums.homecomingservers.com"
+                f"/topic/{topic_id}-{slug}"
+            )
 
             # Anti doublons
             if link in seen_links:
@@ -171,7 +241,9 @@ def fetch_topics():
                     "html.parser"
                 )
 
-                content = soup.select_one(".ipsType_richText")
+                content = soup.select_one(
+                    ".ipsType_richText"
+                )
 
                 if content:
                     summary = content.get_text(
@@ -184,11 +256,15 @@ def fetch_topics():
                 if time_tag:
                     topic_date = (
                         time_tag.get("datetime")
-                        or time_tag.get_text(strip=True)
+                        or time_tag.get_text(
+                            strip=True
+                        )
                     )
 
             except Exception as e:
-                print(f"Summary fetch error: {e}")
+                print(
+                    f"Summary fetch error: {e}"
+                )
 
             all_topics.append({
                 "forum": forum_name,
@@ -256,7 +332,10 @@ def main():
 
         total_recent_topics += 1
 
-        print(f"New recent topic detected: {title}")
+        print(
+            f"New recent topic detected: "
+            f"{title}"
+        )
 
         new_seen.append(topic)
 
@@ -288,31 +367,68 @@ def main():
 
             print(f"Keyword match: {title}")
 
-            # ENVOI ACTIF
+            # CallMeBot
             try:
-                send_whatsapp(whatsapp_message)
+                send_whatsapp_callmebot(
+                    whatsapp_message
+                )
                 whatsapp_sent += 1
             except Exception as e:
-                print(f"WhatsApp error: {e}")
+                print(
+                    f"CallMeBot error: {e}"
+                )
 
+            # Twilio fallback
+            try:
+                send_whatsapp_twilio(
+                    whatsapp_message
+                )
+                whatsapp_sent += 1
+            except Exception as e:
+                print(f"Twilio error: {e}")
+
+            # Email
             try:
                 send_email(
-                    subject=f"Homecoming Alert: {title}",
+                    subject=(
+                        "Homecoming Alert: "
+                        f"{title}"
+                    ),
                     body=email_body
                 )
+
                 emails_sent += 1
+
             except Exception as e:
                 print(f"Email error: {e}")
 
     save_seen_topics(new_seen)
 
     print("\n========== HC WATCHER DEBUG ==========")
-    print(f"Topics checked        : {total_topics_checked}")
-    print(f"New topics detected   : {total_new_topics}")
-    print(f"Recent topics         : {total_recent_topics}")
-    print(f"Keyword matches       : {total_keyword_matches}")
-    print(f"WhatsApp sent         : {whatsapp_sent}")
-    print(f"Emails sent           : {emails_sent}")
+    print(
+        f"Topics checked        : "
+        f"{total_topics_checked}"
+    )
+    print(
+        f"New topics detected   : "
+        f"{total_new_topics}"
+    )
+    print(
+        f"Recent topics         : "
+        f"{total_recent_topics}"
+    )
+    print(
+        f"Keyword matches       : "
+        f"{total_keyword_matches}"
+    )
+    print(
+        f"WhatsApp sent         : "
+        f"{whatsapp_sent}"
+    )
+    print(
+        f"Emails sent           : "
+        f"{emails_sent}"
+    )
     print("======================================\n")
 
 
