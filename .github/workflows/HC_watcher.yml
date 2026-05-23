@@ -1,4 +1,4 @@
-name: Homecoming Forum Watcher
+name: HC Forum Watcher
 
 on:
   schedule:
