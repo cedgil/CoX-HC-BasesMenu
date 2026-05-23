@@ -1,0 +1,49 @@
+name: Homecoming Forum Watcher
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+
+  workflow_dispatch:
+
+jobs:
+  watch-forum:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install -r automation/homecoming_watcher/requirements.txt
+
+      - name: Run watcher
+        env:
+          CALLMEBOT_APIKEY: ${{ secrets.CALLMEBOT_APIKEY }}
+          WHATSAPP_PHONE: ${{ secrets.WHATSAPP_PHONE }}
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          KEYWORDS: ${{ secrets.KEYWORDS }}
+        run: |
+          python automation/homecoming_watcher/watcher.py
+
+      - name: Commit updated seen topics
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+
+          git add automation/homecoming_watcher/seen_topics.json
+
+          git diff --cached --quiet || git commit -m "Update seen topics"
+
+          git push
