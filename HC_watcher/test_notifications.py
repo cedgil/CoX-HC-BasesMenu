@@ -77,7 +77,12 @@ def test_callmebot():
             f"{response.status_code}"
         )
 
-        print(response.text)
+        print("Response text:")
+print(response.text)
+
+print()
+print("Final URL:")
+print(response.url)
 
     except Exception as e:
 
