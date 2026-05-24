@@ -33,4 +33,4 @@ jobs:
           EMAIL_TO: ${{ secrets.EMAIL_TO }}
 
         run: |
-          python test_notifications.py
+          python HC_watcher/test_notifications.py
