@@ -171,27 +171,56 @@ def sanitize_category(category):
 
         "Contributing builders",
         "Other associated contributors",
-        "Any additional information",
+        "Other associated co",
         "Additional Info",
+        "Must-See Areas",
         "Special or Hidden Features",
+        "Any additional information",
         "Is flight or teleportation",
         "Description",
+        "Definitely a base",
         "Edited",
         "Posted"
+
     ]
 
     for stop in STOP_WORDS:
 
-        idx = category.find(stop)
+        idx = category.lower().find(
+            stop.lower()
+        )
 
         if idx > 0:
+
             category = category[:idx].strip()
 
-    category = re.sub(r"\s+\d+$", "", category)
+    category = re.sub(
+        r"\s+\d+$",
+        "",
+        category
+    )
 
-    if category.lower().startswith("where does this fit?"):
+    category = category.replace(
+        "Fantasy /",
+        "Fantasy"
+    )
 
-        category = category.split("?")[-1].strip()
+    category = category.replace(
+        "Tech /",
+        "Tech"
+    )
+
+    category = category.replace(
+        "Other /",
+        "Other"
+    )
+
+    category = category.replace(
+        "  ",
+        " "
+    )
+
+    category = category.strip(" :-")
 
     return clean(category)
 
