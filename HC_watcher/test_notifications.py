@@ -1,5 +1,6 @@
 import os
 import smtplib
+
 from email.mime.text import MIMEText
 
 import requests
@@ -30,7 +31,7 @@ EMAIL_TO = os.getenv(
 )
 
 # =========================================================
-# WHATSAPP TEST
+# CALLMEBOT TEST
 # =========================================================
 
 def test_callmebot():
@@ -38,20 +39,47 @@ def test_callmebot():
     print("========================================")
     print("TESTING CALLMEBOT")
     print("========================================")
+    print()
+
+    # =====================================================
+    # CHECK CONFIG
+    # =====================================================
 
     if not CALLMEBOT_APIKEY:
 
+        print("ERROR:")
         print("Missing CALLMEBOT_APIKEY")
+        print()
+
         return
 
     if not WHATSAPP_PHONE:
 
+        print("ERROR:")
         print("Missing WHATSAPP_PHONE")
+        print()
+
         return
+
+    print("PHONE:")
+    print(WHATSAPP_PHONE)
+    print()
+
+    print("API KEY:")
+    print(CALLMEBOT_APIKEY)
+    print()
+
+    # =====================================================
+    # MESSAGE
+    # =====================================================
 
     message = (
         "✅ CallMeBot test successful"
     )
+
+    # =====================================================
+    # REQUEST
+    # =====================================================
 
     url = (
         "https://api.callmebot.com/whatsapp.php"
@@ -72,21 +100,37 @@ def test_callmebot():
             timeout=30
         )
 
-        print(
-            f"HTTP Status: "
-            f"{response.status_code}"
-        )
+        # =================================================
+        # DEBUG OUTPUT
+        # =================================================
 
-        print("Response text:")
-print(response.text)
+        print("HTTP STATUS:")
+        print(response.status_code)
+        print()
 
-print()
-print("Final URL:")
-print(response.url)
+        print("RESPONSE TEXT:")
+        print(response.text)
+        print()
+
+        print("FINAL URL:")
+        print(response.url)
+        print()
+
+        if response.status_code == 200:
+
+            print("WHATSAPP SENT SUCCESSFULLY")
+            print()
+
+        else:
+
+            print("WHATSAPP FAILED")
+            print()
 
     except Exception as e:
 
-        print(f"CallMeBot error: {e}")
+        print("CALLMEBOT ERROR:")
+        print(e)
+        print()
 
 # =========================================================
 # EMAIL TEST
@@ -97,6 +141,7 @@ def test_email():
     print("========================================")
     print("TESTING EMAIL")
     print("========================================")
+    print()
 
     required = [
 
@@ -107,10 +152,27 @@ def test_email():
 
     if not all(required):
 
+        print("ERROR:")
         print("Missing email configuration")
+        print()
+
         return
 
-    subject = "HC Watcher Email Test"
+    print("FROM:")
+    print(GMAIL_USER)
+    print()
+
+    print("TO:")
+    print(EMAIL_TO)
+    print()
+
+    # =====================================================
+    # EMAIL CONTENT
+    # =====================================================
+
+    subject = (
+        "HC Watcher Email Test"
+    )
 
     body = (
         "✅ Gmail SMTP test successful"
@@ -121,6 +183,10 @@ def test_email():
     msg["Subject"] = subject
     msg["From"] = GMAIL_USER
     msg["To"] = EMAIL_TO
+
+    # =====================================================
+    # SEND
+    # =====================================================
 
     try:
 
@@ -138,11 +204,14 @@ def test_email():
 
             server.send_message(msg)
 
-        print("Email sent successfully")
+        print("EMAIL SENT SUCCESSFULLY")
+        print()
 
     except Exception as e:
 
-        print(f"Email error: {e}")
+        print("EMAIL ERROR:")
+        print(e)
+        print()
 
 # =========================================================
 # MAIN
@@ -150,8 +219,18 @@ def test_email():
 
 if __name__ == "__main__":
 
+    print("========================================")
+    print("NOTIFICATION TEST SCRIPT")
+    print("========================================")
+    print()
+
     test_callmebot()
 
     print()
 
     test_email()
+
+    print("========================================")
+    print("TEST FINISHED")
+    print("========================================")
+    print()
