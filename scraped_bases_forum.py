@@ -160,25 +160,6 @@ def extract_server_from_text(text):
     return None
 
 
-def normalize_category_case(category):
-
-    if not category:
-        return None
-
-    category = category.strip()
-
-    words = []
-
-    for word in category.split():
-
-        if word.upper() in ["RP", "WIP"]:
-            words.append(word.upper())
-        else:
-            words.append(word.capitalize())
-
-    return " ".join(words)
-
-
 def sanitize_category(category):
 
     if not category:
@@ -186,40 +167,87 @@ def sanitize_category(category):
 
     category = clean(category)
 
-    STOP_WORDS = [
+    category = category.replace(
+        "\n",
+        " "
+    )
 
-        "Contributing builders",
-        "Other associated contributors",
-        "Other associated co",
-        "Additional Info",
-        "Must-See Areas",
-        "Special or Hidden Features",
-        "Any additional information",
-        "Is flight or teleportation",
-        "Description",
-        "Definitely a base",
-        "Edited",
-        "Posted",
-        "So, Clubs and Venues",
-        "I thought it was",
-        "Think I technically",
-        "Haven't put this",
-        "I can't show",
-        "Its a small but functional"
+    # =====================================================
+    # REMOVE EVERYTHING AFTER EXPLANATIONS
+    # =====================================================
+
+    STOP_PATTERNS = [
+
+        r"\bfor those interested\b",
+        r"\barea of interest\b",
+        r"\bso, clubs and venues\b",
+        r"\bi thought it was\b",
+        r"\bthink i technically\b",
+        r"\bhaven't put this\b",
+        r"\bi can't show\b",
+        r"\bits a small but functional\b",
+        r"\bwhich, i list things\b",
+        r"\bfeel free to relocate\b",
+        r"\bmust have water effects\b",
+        r"\bimportant\b",
+        r"\bthere are other restaurants\b"
 
     ]
 
-    for stop in STOP_WORDS:
+    lowered = category.lower()
 
-        idx = category.lower().find(
-            stop.lower()
+    for pattern in STOP_PATTERNS:
+
+        match = re.search(
+            pattern,
+            lowered,
+            re.IGNORECASE
         )
 
-        if idx > 0:
+        if match:
 
-            category = category[:idx].strip()
+            category = category[:match.start()].strip()
+            lowered = category.lower()
 
-    category = category.split("\n")[0]
+    # =====================================================
+    # REMOVE PARENTHESIS
+    # =====================================================
+
+    category = re.sub(
+        r"\(.*?\)",
+        "",
+        category
+    )
+
+    # =====================================================
+    # SPECIAL FIXES
+    # =====================================================
+
+    special_map = {
+
+        "realism or maybe other misc": "Realism",
+
+        "clubs and venues": "Clubs And Venues",
+
+        "tech sci-fi": "Tech Sci-Fi",
+        "tech/sci-fi": "Tech Sci-Fi",
+
+        "fantasy arcane": "Fantasy Arcane",
+        "fantasy/arcane": "Fantasy Arcane",
+
+        "other misc": "Other Misc",
+        "other/misc": "Other Misc"
+
+    }
+
+    lowered = category.lower().strip()
+
+    if lowered in special_map:
+        category = special_map[lowered]
+
+    # =====================================================
+    # HANDLE SLASHES
+    # =====================================================
 
     if "/" in category:
 
@@ -232,11 +260,9 @@ def sanitize_category(category):
         if parts:
             category = parts[0]
 
-    category = re.sub(
-        r"\(.*?\)",
-        "",
-        category
-    )
+    # =====================================================
+    # REMOVE TRAILING NUMBERS
+    # =====================================================
 
     category = re.sub(
         r"\s+\d+$",
@@ -244,9 +270,109 @@ def sanitize_category(category):
         category
     )
 
+    # =====================================================
+    # REMOVE "ITEMS"
+    # =====================================================
+
+    category = re.sub(
+        r"\bitems\b",
+        "",
+        category,
+        flags=re.IGNORECASE
+    )
+
+    # =====================================================
+    # NORMALIZE UNDER / OVER
+    # =====================================================
+
+    category = re.sub(
+        r"under\s+7k",
+        "Under 7K",
+        category,
+        flags=re.IGNORECASE
+    )
+
+    category = re.sub(
+        r"over\s+7k",
+        "Over 7K",
+        category,
+        flags=re.IGNORECASE
+    )
+
+    # =====================================================
+    # REMOVE DOUBLE SPACES
+    # =====================================================
+
+    category = re.sub(
+        r"\s+",
+        " ",
+        category
+    )
+
     category = category.strip(" :-,.;")
 
-    category = normalize_category_case(category)
+    # =====================================================
+    # TITLE CASE
+    # =====================================================
+
+    words = []
+
+    for word in category.split():
+
+        if word.upper() in ["RP", "WIP", "7K"]:
+            words.append(word.upper())
+
+        else:
+            words.append(word.capitalize())
+
+    category = " ".join(words)
+
+    # =====================================================
+    # FINAL CATEGORY FUSIONS
+    # =====================================================
+
+    fusion_map = {
+
+        "Decorated Utility Base Under 7K":
+            "Decorated Utility Base Under 7K",
+
+        "Decorated Utility Base Under 7K Items":
+            "Decorated Utility Base Under 7K",
+
+        "Decorated Utility Base Over 7K":
+            "Decorated Utility Base Over 7K",
+
+        "Decorated Utility Base Over 7K Items":
+            "Decorated Utility Base Over 7K",
+
+        "Multipurpose Base Under 7K":
+            "Multipurpose Base Under 7K",
+
+        "Multipurpose Base Under 7K Items":
+            "Multipurpose Base Under 7K",
+
+        "Multipurpose Base Over 7K":
+            "Multipurpose Base Over 7K",
+
+        "Multipurpose Base Over 7K Items":
+            "Multipurpose Base Over 7K",
+
+        "RP Base Under 7K":
+            "RP Base Under 7K",
+
+        "RP Base Under 7K Items":
+            "RP Base Under 7K",
+
+        "RP Base Over 7K":
+            "RP Base Over 7K",
+
+        "RP Base Over 7K Items":
+            "RP Base Over 7K"
+
+    }
+
+    if category in fusion_map:
+        category = fusion_map[category]
 
     return clean(category)
 
