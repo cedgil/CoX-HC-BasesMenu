@@ -53,6 +53,20 @@ SERVER_MAP = {
 }
 
 # =========================================================
+# CATEGORY ALIASES
+# =========================================================
+
+CATEGORY_ALIASES = {
+
+    "Tech Sci-Fi": "Tech/Sci-Fi",
+    "Sci-Fi": "Tech/Sci-Fi",
+
+    "Other Misc": "Other/Misc",
+
+    "Fantasy Arcane": "Fantasy/Arcane"
+}
+
+# =========================================================
 # SUPABASE
 # =========================================================
 
@@ -160,112 +174,22 @@ def extract_server_from_text(text):
     return None
 
 
-def extract_field(raw_text, label):
-
-    relaxed = re.sub(
-        r"\s+",
-        r"\\s+",
-        re.escape(label)
-    )
-
-    pattern = (
-        rf"{relaxed}\s*:?\s*(.*?)"
-        rf"(?=\n[A-Z][^\n]{0,50}:|\Z)"
-    )
-
-    match = re.search(
-        pattern,
-        raw_text,
-        re.IGNORECASE | re.DOTALL
-    )
-
-    if not match:
-        return None
-
-    value = clean(match.group(1))
-
-    value = re.sub(
-        r"\s+",
-        " ",
-        value
-    )
-
-    return value.strip()
-
-
-def extract_description(raw_text):
-
-    match = re.search(
-        r"Description\s*:?\s*(.*?)(?=Edited|$)",
-        raw_text,
-        re.IGNORECASE | re.DOTALL
-    )
-
-    if not match:
-        return None
-
-    desc = clean(match.group(1))
-
-    if not desc:
-        return None
-
-    return desc
-
-
-def split_post_into_blocks(raw_post):
-
-    pattern = re.compile(
-
-        r"(?=("
-        r"Supergroup\s+Name\s*:?\s*|"
-        r"Base\s+or\s+SG\s+Name\s*:?\s*"
-        r"))",
-
-        re.IGNORECASE
-    )
-
-    matches = list(pattern.finditer(raw_post))
-
-    if not matches:
-        return [raw_post]
-
-    blocks = []
-
-    for i, match in enumerate(matches):
-
-        start = match.start()
-
-        if i + 1 < len(matches):
-            end = matches[i + 1].start()
-        else:
-            end = len(raw_post)
-
-        chunk = raw_post[start:end].strip()
-
-        if chunk:
-            blocks.append(chunk)
-
-    return blocks
-
-
 def get_total_pages(soup):
 
     max_page = 1
 
-    for link in soup.select("a[href]"):
+    for a in soup.select("a[href]"):
 
-        href = link.get("href", "")
+        href = a.get("href", "")
 
-        m = re.search(
-            r"/page/(\d+)/",
-            href
-        )
+        m = re.search(r"/page/(\d+)/", href)
 
         if m:
 
             page = int(m.group(1))
 
-            max_page = max(max_page, page)
+            if page > max_page:
+                max_page = page
 
     return max_page
 
@@ -275,13 +199,203 @@ def get_page_url(base_url, page):
     if page <= 1:
         return base_url
 
-    base_url = base_url.rstrip("/")
-
-    return f"{base_url}/page/{page}/"
+    return base_url.rstrip("/") + f"/page/{page}/"
 
 
 # =========================================================
-# SUPABASE REQUESTS
+# CATEGORY CLEANING
+# =========================================================
+
+STOP_PATTERNS = [
+
+    r"Special or Hidden Features.*",
+    r"Is flight or teleportation.*",
+    r"Additional Info.*",
+    r"Must-See Areas.*",
+    r"Other associated contributors.*",
+    r"Contributing builders.*",
+    r"Edited.*",
+    r"Posted.*",
+    r"Area of interest.*",
+    r"For those interested in lore.*",
+    r"So, Clubs and Venues.*",
+    r"I can't show a lot because.*",
+    r"Haven't put this in the base registry.*",
+    r"It's a small but functional base.*"
+]
+
+
+def clean_category(raw):
+
+    if not raw:
+        return None
+
+    category = clean(raw)
+
+    for pattern in STOP_PATTERNS:
+
+        category = re.sub(
+            pattern,
+            "",
+            category,
+            flags=re.IGNORECASE
+        )
+
+    category = category.strip(" :-.,;/")
+
+    category = re.sub(
+        r"\s+items?$",
+        "",
+        category,
+        flags=re.IGNORECASE
+    )
+
+    category = re.sub(
+        r"\s+2$",
+        "",
+        category
+    )
+
+    category = re.sub(
+        r"\s+The$",
+        "",
+        category,
+        flags=re.IGNORECASE
+    )
+
+    category = category.strip()
+
+    return category
+
+
+def normalize_category(category):
+
+    if not category:
+        return None
+
+    category = clean_category(category)
+
+    if not category:
+        return None
+
+    for alias, target in CATEGORY_ALIASES.items():
+
+        if category.lower() == alias.lower():
+            return target
+
+    category = re.sub(
+        r"\s+under\s+7k.*",
+        " Under 7K",
+        category,
+        flags=re.IGNORECASE
+    )
+
+    category = re.sub(
+        r"\s+over\s+7k.*",
+        " Over 7K",
+        category,
+        flags=re.IGNORECASE
+    )
+
+    category = category.strip()
+
+    return category
+
+
+def resolve_category(raw_category, allowed_categories):
+
+    category = normalize_category(raw_category)
+
+    if not category:
+        return None
+
+    if not allowed_categories:
+        return category
+
+    for allowed in allowed_categories:
+
+        if category.lower() == allowed.lower():
+            return allowed
+
+    for allowed in allowed_categories:
+
+        if category.lower().startswith(allowed.lower()):
+            return allowed
+
+    return category
+
+
+# =========================================================
+# FIELD EXTRACTION
+# =========================================================
+
+def extract_field(text, label):
+
+    if not label:
+        return None
+
+    pattern = (
+        re.escape(label)
+        + r"\s*(.*?)"
+        + r"(?=\n[A-Z][^:\n]{1,80}:|\Z)"
+    )
+
+    m = re.search(
+        pattern,
+        text,
+        re.IGNORECASE | re.DOTALL
+    )
+
+    if not m:
+        return None
+
+    value = clean(m.group(1))
+
+    value = value.split("\n")[0].strip()
+
+    return value
+
+
+def extract_post_author(article):
+
+    selectors = [
+
+        ".ipsType_break",
+        ".cAuthorPane_author strong",
+        ".ipsType_sectionHead"
+    ]
+
+    for selector in selectors:
+
+        el = article.select_one(selector)
+
+        if el:
+
+            value = clean(el.get_text())
+
+            if value:
+                return value
+
+    return None
+
+
+def extract_post_date(article):
+
+    time_el = article.select_one("time")
+
+    if not time_el:
+        return None
+
+    value = (
+        time_el.get("datetime")
+        or time_el.get_text(strip=True)
+    )
+
+    return clean(value)
+
+
+# =========================================================
+# SUPABASE
 # =========================================================
 
 def upsert_base(data):
@@ -332,14 +446,62 @@ def purge_old_bases():
 
     print(f"PURGE STATUS: {r.status_code}")
 
-    if r.status_code >= 400:
-        print(r.text)
-
 # =========================================================
 # SCRAPER
 # =========================================================
 
 TOTAL_UPSERTED = 0
+
+
+def split_post_into_chunks(text):
+
+    markers = [
+
+        "Supergroup Name:",
+        "Base or SG Name:",
+        "Your base’s name:"
+    ]
+
+    positions = []
+
+    lower = text.lower()
+
+    for marker in markers:
+
+        idx = 0
+
+        while True:
+
+            pos = lower.find(marker.lower(), idx)
+
+            if pos == -1:
+                break
+
+            positions.append(pos)
+
+            idx = pos + 1
+
+    positions = sorted(set(positions))
+
+    if not positions:
+        return [text]
+
+    chunks = []
+
+    for i, pos in enumerate(positions):
+
+        end = (
+            positions[i + 1]
+            if i + 1 < len(positions)
+            else len(text)
+        )
+
+        chunk = text[pos:end].strip()
+
+        if chunk:
+            chunks.append(chunk)
+
+    return chunks
 
 
 def scrape_source(source):
@@ -403,64 +565,42 @@ def scrape_source(source):
             if not raw_post:
                 continue
 
-            post_author = None
-            post_date = None
+            chunks = split_post_into_chunks(raw_post)
 
-            author_tag = article.select_one(
-                "[data-author]"
-            )
-
-            if author_tag:
-                post_author = clean(
-                    author_tag.get("data-author")
-                )
-
-            time_tag = article.select_one("time")
-
-            if time_tag:
-
-                post_date = (
-                    time_tag.get("datetime")
-                    or clean(time_tag.get_text())
-                )
-
-            blocks = split_post_into_blocks(raw_post)
-
-            for chunk in blocks:
+            for chunk in chunks:
 
                 parsed = {}
 
                 for key, label in source["fields"].items():
 
-                    value = extract_field(
+                    parsed[key] = extract_field(
                         chunk,
                         label
                     )
 
-                    parsed[key] = value
-
                 if not parsed.get("shard"):
 
-                    inferred_server = extract_server_from_text(chunk)
+                    inferred = extract_server_from_text(chunk)
 
-                    if inferred_server:
-                        parsed["shard"] = inferred_server
+                    if inferred:
+                        parsed["shard"] = inferred
 
                 parsed["shard"] = normalize_server(
                     parsed.get("shard")
                 )
 
-                parsed["description"] = extract_description(chunk)
+                parsed["category"] = resolve_category(
+                    parsed.get("category"),
+                    source.get("allowed_categories", [])
+                )
+
+                parsed["post_author"] = extract_post_author(article)
+
+                parsed["post_date"] = extract_post_date(article)
 
                 parsed["source_url"] = page_url
 
                 parsed["source_page"] = page
-
-                parsed["source_topic"] = (
-                    topic_url
-                    .split("/topic/")[1]
-                    .split("/")[0]
-                )
 
                 parsed["event_name"] = source["event_name"]
 
@@ -468,11 +608,10 @@ def scrape_source(source):
 
                 parsed["raw_post"] = chunk
 
-                parsed["post_author"] = post_author
-
-                parsed["post_date"] = post_date
-
                 if not parsed.get("supergroup_name"):
+                    continue
+
+                if not parsed.get("base_code"):
                     continue
 
                 if not parsed.get("shard"):
@@ -480,13 +619,6 @@ def scrape_source(source):
 
                 if parsed["shard"] not in VALID_SHARDS:
                     continue
-
-                if not parsed.get("base_code"):
-                    continue
-
-                parsed["supergroup_name"] = clean(
-                    parsed["supergroup_name"]
-                )
 
                 parsed["base_code"] = clean(
                     parsed["base_code"]
