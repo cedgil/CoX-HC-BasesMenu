@@ -160,6 +160,33 @@ def extract_server_from_text(text):
     return None
 
 
+def sanitize_supergroup_name(name):
+
+    if not name:
+        return None
+
+    name = clean(name)
+
+    patterns = [
+
+        r"\(but.*?$",
+        r"\(sg.*?$",
+        r"\(supergroup.*?$",
+        r"\(the sg.*?$"
+    ]
+
+    for pattern in patterns:
+
+        name = re.sub(
+            pattern,
+            "",
+            name,
+            flags=re.IGNORECASE
+        )
+
+    return clean(name)
+
+
 def sanitize_category(category):
 
     if not category:
@@ -181,7 +208,6 @@ def sanitize_category(category):
         "Definitely a base",
         "Edited",
         "Posted"
-
     ]
 
     for stop in STOP_WORDS:
@@ -193,6 +219,32 @@ def sanitize_category(category):
         if idx > 0:
 
             category = category[:idx].strip()
+
+    STOP_PATTERNS = [
+
+        r"\(",
+        r"I thought",
+        r"Think I",
+        r"Haven't put",
+        r"I can't show",
+        r"feel free",
+        r"Its a",
+        r"It's a",
+        r"you'll need",
+        r"must have"
+    ]
+
+    for pattern in STOP_PATTERNS:
+
+        m = re.search(
+            pattern,
+            category,
+            re.IGNORECASE
+        )
+
+        if m:
+
+            category = category[:m.start()].strip()
 
     category = re.sub(
         r"\s+\d+$",
@@ -220,6 +272,8 @@ def sanitize_category(category):
         " "
     )
 
+    category = category.rstrip(".,:- ")
+
     category = category.strip(" :-")
 
     return clean(category)
@@ -239,7 +293,17 @@ def extract_field(raw_text, label):
     pattern = (
         relaxed_label
         + r"\s*(.*?)"
-        + r"(?=\n(?:[A-Z]\s*){2,}[^\n]{0,60}:|\Z)"
+        + r"(?=\n(?:"
+        + r"Supergroup Name|"
+        + r"Base or SG Name|"
+        + r"Shard|"
+        + r"Shard/Server|"
+        + r"Passcode|"
+        + r"Base Code|"
+        + r"Category|"
+        + r"Description|"
+        + r"Special or Hidden Features"
+        + r")[^\n]{0,60}:|\Z)"
     )
 
     match = re.search(
@@ -252,6 +316,12 @@ def extract_field(raw_text, label):
         return None
 
     value = clean(match.group(1))
+
+    value = re.split(
+        r"(Shard/Server|Shard|Base Code|Passcode|Category)",
+        value,
+        flags=re.IGNORECASE
+    )[0].strip()
 
     value = value.split("\n")[0].strip()
 
@@ -277,17 +347,46 @@ def extract_description(raw_text):
     return desc
 
 # =========================================================
-# FIXED PAGINATION
+# SPLIT MULTI BASE POSTS
+# =========================================================
+
+def split_into_base_blocks(raw_post):
+
+    pattern = re.compile(
+        r"(?=(?:Supergroup Name|Base or SG Name)\s*:)",
+        re.IGNORECASE
+    )
+
+    matches = list(pattern.finditer(raw_post))
+
+    if not matches:
+        return [raw_post]
+
+    blocks = []
+
+    for i, match in enumerate(matches):
+
+        start = match.start()
+
+        if i + 1 < len(matches):
+            end = matches[i + 1].start()
+        else:
+            end = len(raw_post)
+
+        block = raw_post[start:end].strip()
+
+        if block:
+            blocks.append(block)
+
+    return blocks
+
+# =========================================================
+# PAGINATION
 # =========================================================
 
 def get_total_pages(soup):
 
     max_page = 1
-
-    # =====================================================
-    # METHOD 1
-    # data-page
-    # =====================================================
 
     for tag in soup.select("[data-page]"):
 
@@ -300,11 +399,6 @@ def get_total_pages(soup):
 
         except:
             pass
-
-    # =====================================================
-    # METHOD 2
-    # ?page=2
-    # =====================================================
 
     for link in soup.select("a[href*='page=']"):
 
@@ -321,11 +415,6 @@ def get_total_pages(soup):
 
             if page > max_page:
                 max_page = page
-
-    # =====================================================
-    # METHOD 3
-    # /page/2/
-    # =====================================================
 
     for link in soup.select("a[href*='/page/']"):
 
@@ -441,10 +530,6 @@ def scrape_source(source):
 
     soup = BeautifulSoup(r.text, "html.parser")
 
-    # =====================================================
-    # DEBUG PAGINATION
-    # =====================================================
-
     print("==================================================")
     print("PAGINATION DEBUG")
     print("==================================================")
@@ -499,116 +584,158 @@ def scrape_source(source):
             if not raw_post:
                 continue
 
-            parsed = {}
+            # =====================================================
+            # AUTHOR / DATE
+            # =====================================================
 
-            for key, label in source["fields"].items():
-
-                value = extract_field(raw_post, label)
-
-                parsed[key] = value
-
-            if not parsed.get("shard"):
-
-                inferred_server = extract_server_from_text(raw_post)
-
-                if inferred_server:
-                    parsed["shard"] = inferred_server
-
-            parsed["shard"] = normalize_server(
-                parsed.get("shard")
+            author_tag = article.select_one(
+                ".ipsType_break.ipsContained a"
             )
 
-            parsed["category"] = sanitize_category(
-                parsed.get("category")
-            )
+            post_author = None
 
-            if (
-                source["event_type"] == "contest"
-                and (
-                    not parsed.get("category")
-                    or parsed["category"].lower() in [
-                        "unknown",
-                        "n/a",
-                        "none"
-                    ]
+            if author_tag:
+                post_author = clean(
+                    author_tag.get_text()
                 )
-            ):
-                parsed["category"] = "Thematic Contest"
 
-            parsed["description"] = extract_description(raw_post)
+            time_tag = article.select_one("time")
 
-            parsed["source_url"] = page_url
+            post_date = None
 
-            parsed["source_page"] = page
+            if time_tag:
 
-            parsed["source_topic"] = (
-                topic_url
-                .split("/topic/")[1]
-                .split("/")[0]
-            )
+                post_date = (
+                    time_tag.get("datetime")
+                    or clean(time_tag.get_text())
+                )
 
-            parsed["event_name"] = source["event_name"]
+            # =====================================================
+            # SPLIT MULTI BASE POSTS
+            # =====================================================
 
-            parsed["event_type"] = source["event_type"]
+            blocks = split_into_base_blocks(raw_post)
 
-            parsed["raw_post"] = raw_post
+            for block in blocks:
 
-            template_values = [
+                parsed = {}
 
-                "Shard/Server",
-                "Base Code",
-                "Category to list base in",
-                "Passcode",
-                "Shard",
-                "Category for Contest"
-            ]
+                for key, label in source["fields"].items():
 
-            if (
-                parsed.get("shard") in template_values
-                or parsed.get("base_code") in template_values
-            ):
-                continue
+                    value = extract_field(block, label)
 
-            if not parsed.get("supergroup_name"):
-                continue
+                    parsed[key] = value
 
-            if not parsed.get("shard"):
-                continue
+                parsed["supergroup_name"] = sanitize_supergroup_name(
+                    parsed.get("supergroup_name")
+                )
 
-            if parsed["shard"] not in VALID_SHARDS:
-                continue
+                if not parsed.get("shard"):
 
-            if not parsed.get("base_code"):
-                continue
+                    inferred_server = extract_server_from_text(block)
 
-            parsed["base_code"] = clean(
-                parsed["base_code"]
-            )
+                    if inferred_server:
+                        parsed["shard"] = inferred_server
 
-            parsed["base_code"] = (
-                parsed["base_code"]
-                .split(" ")[0]
-                .strip()
-            )
+                parsed["shard"] = normalize_server(
+                    parsed.get("shard")
+                )
 
-            if not re.match(
-                r"^[A-Z0-9]+-[0-9]+$",
-                parsed["base_code"],
-                re.IGNORECASE
-            ):
-                continue
+                parsed["category"] = sanitize_category(
+                    parsed.get("category")
+                )
 
-            print("--------------------------------------------------")
-            print("PARSED DATA:")
-            print(parsed)
+                if (
+                    source["event_type"] == "contest"
+                    and (
+                        not parsed.get("category")
+                        or parsed["category"].lower() in [
+                            "unknown",
+                            "n/a",
+                            "none"
+                        ]
+                    )
+                ):
+                    parsed["category"] = "Thematic Contest"
 
-            inserted = upsert_base(parsed)
+                parsed["description"] = extract_description(block)
 
-            if inserted:
+                parsed["source_url"] = page_url
 
-                TOTAL_UPSERTED += 1
+                parsed["source_page"] = page
 
-                print("UPSERTED")
+                parsed["source_topic"] = (
+                    topic_url
+                    .split("/topic/")[1]
+                    .split("/")[0]
+                )
+
+                parsed["event_name"] = source["event_name"]
+
+                parsed["event_type"] = source["event_type"]
+
+                parsed["raw_post"] = block
+
+                parsed["post_author"] = post_author
+
+                parsed["post_date"] = post_date
+
+                template_values = [
+
+                    "Shard/Server",
+                    "Base Code",
+                    "Category to list base in",
+                    "Passcode",
+                    "Shard",
+                    "Category for Contest"
+                ]
+
+                if (
+                    parsed.get("shard") in template_values
+                    or parsed.get("base_code") in template_values
+                ):
+                    continue
+
+                if not parsed.get("supergroup_name"):
+                    continue
+
+                if not parsed.get("shard"):
+                    continue
+
+                if parsed["shard"] not in VALID_SHARDS:
+                    continue
+
+                if not parsed.get("base_code"):
+                    continue
+
+                parsed["base_code"] = clean(
+                    parsed["base_code"]
+                )
+
+                parsed["base_code"] = (
+                    parsed["base_code"]
+                    .split(" ")[0]
+                    .strip()
+                )
+
+                if not re.match(
+                    r"^[A-Z0-9]+-[0-9]+$",
+                    parsed["base_code"],
+                    re.IGNORECASE
+                ):
+                    continue
+
+                print("--------------------------------------------------")
+                print("PARSED DATA:")
+                print(parsed)
+
+                inserted = upsert_base(parsed)
+
+                if inserted:
+
+                    TOTAL_UPSERTED += 1
+
+                    print("UPSERTED")
 
 # =========================================================
 # MAIN
