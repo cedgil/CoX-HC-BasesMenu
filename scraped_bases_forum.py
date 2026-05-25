@@ -276,18 +276,65 @@ def extract_description(raw_text):
 
     return desc
 
+# =========================================================
+# FIXED PAGINATION
+# =========================================================
 
 def get_total_pages(soup):
 
-    links = soup.select("a[href*='page=']")
-
     max_page = 1
 
-    for link in links:
+    # =====================================================
+    # METHOD 1
+    # data-page
+    # =====================================================
+
+    for tag in soup.select("[data-page]"):
+
+        try:
+
+            page = int(tag.get("data-page"))
+
+            if page > max_page:
+                max_page = page
+
+        except:
+            pass
+
+    # =====================================================
+    # METHOD 2
+    # ?page=2
+    # =====================================================
+
+    for link in soup.select("a[href*='page=']"):
 
         href = link.get("href", "")
 
-        m = re.search(r"page=(\d+)", href)
+        m = re.search(
+            r"[?&]page=(\d+)",
+            href
+        )
+
+        if m:
+
+            page = int(m.group(1))
+
+            if page > max_page:
+                max_page = page
+
+    # =====================================================
+    # METHOD 3
+    # /page/2/
+    # =====================================================
+
+    for link in soup.select("a[href*='/page/']"):
+
+        href = link.get("href", "")
+
+        m = re.search(
+            r"/page/(\d+)",
+            href
+        )
 
         if m:
 
@@ -304,9 +351,10 @@ def get_page_url(base_url, page):
     if page <= 1:
         return base_url
 
-    separator = "&" if "?" in base_url else "?"
+    if base_url.endswith("/"):
+        return f"{base_url}page/{page}/"
 
-    return f"{base_url}{separator}page={page}"
+    return f"{base_url}/page/{page}/"
 
 # =========================================================
 # SUPABASE REQUESTS
@@ -393,9 +441,29 @@ def scrape_source(source):
 
     soup = BeautifulSoup(r.text, "html.parser")
 
+    # =====================================================
+    # DEBUG PAGINATION
+    # =====================================================
+
+    print("==================================================")
+    print("PAGINATION DEBUG")
+    print("==================================================")
+
+    pagination_links = soup.select("a[href]")
+
+    for link in pagination_links[:200]:
+
+        href = link.get("href", "")
+
+        if "page" in href.lower():
+
+            print(href)
+
     total_pages = get_total_pages(soup)
 
-    print(f"TOTAL PAGES: {total_pages}")
+    print("==================================================")
+    print(f"TOTAL PAGES DETECTED: {total_pages}")
+    print("==================================================")
 
     for page in range(1, total_pages + 1):
 
