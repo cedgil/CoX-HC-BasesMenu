@@ -157,35 +157,83 @@ def extract_server_from_text(text):
         if f"on {key}" in lower:
             return normalized
 
-    return None
+    return None()
 
 
-def sanitize_supergroup_name(name):
+def get_total_pages(soup):
 
-    if not name:
-        return None
+    max_page = 1
 
-    name = clean(name)
+    # =====================================================
+    # STANDARD PAGE LINKS
+    # =====================================================
 
-    patterns = [
+    for link in soup.select("a[href]"):
 
-        r"\(but.*?$",
-        r"\(sg.*?$",
-        r"\(supergroup.*?$",
-        r"\(the sg.*?$"
-    ]
+        href = link.get("href", "")
 
-    for pattern in patterns:
+        patterns = [
 
-        name = re.sub(
-            pattern,
-            "",
-            name,
-            flags=re.IGNORECASE
+            r"/page/(\d+)/",
+            r"[?&]page=(\d+)",
+            r"-page-(\d+)"
+        ]
+
+        for pattern in patterns:
+
+            m = re.search(pattern, href)
+
+            if m:
+
+                page = int(m.group(1))
+
+                if page > max_page:
+                    max_page = page
+
+    # =====================================================
+    # PAGINATION TEXT
+    # =====================================================
+
+    text = soup.get_text(" ", strip=True)
+
+    matches = re.findall(
+        r"Page\s+\d+\s+of\s+(\d+)",
+        text,
+        re.IGNORECASE
+    )
+
+    for m in matches:
+
+        page = int(m)
+
+        if page > max_page:
+            max_page = page
+
+    return max_page
+
+
+def get_page_url(base_url, page):
+
+    if page <= 1:
+        return base_url
+
+    if "/page/" in base_url:
+
+        return re.sub(
+            r"/page/\d+/?",
+            f"/page/{page}/",
+            base_url
         )
 
-    return clean(name)
+    if base_url.endswith("/"):
 
+        return f"{base_url}page/{page}/"
+
+    return f"{base_url}/page/{page}/"
+
+# =========================================================
+# CATEGORY
+# =========================================================
 
 def sanitize_category(category):
 
@@ -193,6 +241,21 @@ def sanitize_category(category):
         return None
 
     category = clean(category)
+
+    # =====================================================
+    # KEEP ONLY FIRST CATEGORY BEFORE /
+    # =====================================================
+
+    if "/" in category:
+
+        first = category.split("/")[0].strip()
+
+        if first:
+            category = first
+
+    # =====================================================
+    # REMOVE LONG EXPLANATIONS / COMMENTS
+    # =====================================================
 
     STOP_WORDS = [
 
@@ -207,7 +270,24 @@ def sanitize_category(category):
         "Description",
         "Definitely a base",
         "Edited",
-        "Posted"
+        "Posted",
+
+        "So,",
+        "Which,",
+        "I can't show",
+        "I list",
+        "feel free",
+        "Important",
+        "Must have",
+        "Its a",
+        "It's a",
+        "Think I technically",
+        "wasn't sure where",
+        "haven't put this",
+        "Home and Living",
+        "games and CC venues",
+        "when a base is also"
+
     ]
 
     for stop in STOP_WORDS:
@@ -220,31 +300,21 @@ def sanitize_category(category):
 
             category = category[:idx].strip()
 
-    STOP_PATTERNS = [
+    # =====================================================
+    # REMOVE COMMENTS BETWEEN () OR AFTER ,
+    # =====================================================
 
-        r"\(",
-        r"I thought",
-        r"Think I",
-        r"Haven't put",
-        r"I can't show",
-        r"feel free",
-        r"Its a",
-        r"It's a",
-        r"you'll need",
-        r"must have"
-    ]
+    category = re.sub(
+        r"\(.*?\)",
+        "",
+        category
+    )
 
-    for pattern in STOP_PATTERNS:
+    category = category.split(",")[0].strip()
 
-        m = re.search(
-            pattern,
-            category,
-            re.IGNORECASE
-        )
-
-        if m:
-
-            category = category[:m.start()].strip()
+    # =====================================================
+    # CLEAN TRAILING GARBAGE
+    # =====================================================
 
     category = re.sub(
         r"\s+\d+$",
@@ -252,81 +322,164 @@ def sanitize_category(category):
         category
     )
 
-    category = category.replace(
-        "Fantasy /",
-        "Fantasy"
-    )
+    category = category.strip(" :-/")
 
-    category = category.replace(
-        "Tech /",
-        "Tech"
-    )
+    # =====================================================
+    # NORMALIZE COMMON VARIANTS
+    # =====================================================
 
-    category = category.replace(
-        "Other /",
-        "Other"
-    )
+    normalized_map = {
 
-    category = category.replace(
-        "  ",
-        " "
-    )
+        "supergroup headquarters":
+            "Supergroup Headquarters",
 
-    category = category.rstrip(".,:- ")
+        "supergroup base":
+            "Supergroup Base",
 
-    category = category.strip(" :-")
+        "clubs and venues":
+            "Clubs and Venues",
+
+        "club and venues":
+            "Clubs and Venues",
+
+        "clubs & venues":
+            "Clubs and Venues",
+
+        "club":
+            "Clubs and Venues",
+
+        "utility base":
+            "Utility Base",
+
+        "utility bases":
+            "Utility Base",
+
+        "free form":
+            "Freeform",
+
+        "freeform":
+            "Freeform",
+
+        "rp base":
+            "RP Base",
+
+        "realism":
+            "Realism",
+
+        "fantasy":
+            "Fantasy",
+
+        "tech":
+            "Tech",
+
+        "space":
+            "Space",
+
+        "nature":
+            "Nature",
+
+        "novice":
+            "Novice",
+
+        "other":
+            "Other",
+
+        "other misc":
+            "Other Misc",
+
+        "misc":
+            "Other Misc"
+
+    }
+
+    lower = category.lower().strip()
+
+    if lower in normalized_map:
+        return normalized_map[lower]
+
+    category = category.title()
 
     return clean(category)
 
+# =========================================================
+# POST SPLITTING
+# =========================================================
 
-def extract_field(raw_text, label):
+def split_post_into_entries(raw_post):
 
-    relaxed_label = ""
+    patterns = [
 
-    for char in label:
+        r"Supergroup Name\s*:",
+        r"Base or SG Name\s*:"
+    ]
 
-        if char.isalpha():
-            relaxed_label += char + r"\s*"
+    combined = "(" + "|".join(patterns) + ")"
+
+    matches = list(
+        re.finditer(
+            combined,
+            raw_post,
+            re.IGNORECASE
+        )
+    )
+
+    if not matches:
+        return [raw_post]
+
+    chunks = []
+
+    for i, match in enumerate(matches):
+
+        start = match.start()
+
+        if i + 1 < len(matches):
+            end = matches[i + 1].start()
         else:
-            relaxed_label += re.escape(char)
+            end = len(raw_post)
 
-    pattern = (
-        relaxed_label
-        + r"\s*(.*?)"
-        + r"(?=\n(?:"
-        + r"Supergroup Name|"
-        + r"Base or SG Name|"
-        + r"Shard|"
-        + r"Shard/Server|"
-        + r"Passcode|"
-        + r"Base Code|"
-        + r"Category|"
-        + r"Description|"
-        + r"Special or Hidden Features"
-        + r")[^\n]{0,60}:|\Z)"
-    )
+        chunk = raw_post[start:end].strip()
 
-    match = re.search(
-        pattern,
-        raw_text,
-        re.IGNORECASE | re.DOTALL
-    )
+        if chunk:
+            chunks.append(chunk)
 
-    if not match:
-        return None
+    return chunks
 
-    value = clean(match.group(1))
+# =========================================================
+# FIELD EXTRACTION
+# =========================================================
 
-    value = re.split(
-        r"(Shard/Server|Shard|Base Code|Passcode|Category)",
-        value,
-        flags=re.IGNORECASE
-    )[0].strip()
+def extract_value_after_label(text, labels):
 
-    value = value.split("\n")[0].strip()
+    if isinstance(labels, str):
+        labels = [labels]
 
-    return value
+    for label in labels:
 
+        pattern = (
+            re.escape(label)
+            + r"\s*:?\s*(.+?)(?=\n[A-Z][^\n]{0,60}:|\Z)"
+        )
+
+        m = re.search(
+            pattern,
+            text,
+            re.IGNORECASE | re.DOTALL
+        )
+
+        if m:
+
+            value = clean(m.group(1))
+
+            value = value.split("\n")[0].strip()
+
+            if value:
+                return value
+
+    return None
+
+# =========================================================
+# DESCRIPTION
+# =========================================================
 
 def extract_description(raw_text):
 
@@ -345,105 +498,6 @@ def extract_description(raw_text):
         return None
 
     return desc
-
-# =========================================================
-# SPLIT MULTI BASE POSTS
-# =========================================================
-
-def split_into_base_blocks(raw_post):
-
-    pattern = re.compile(
-        r"(?=(?:Supergroup Name|Base or SG Name)\s*:)",
-        re.IGNORECASE
-    )
-
-    matches = list(pattern.finditer(raw_post))
-
-    if not matches:
-        return [raw_post]
-
-    blocks = []
-
-    for i, match in enumerate(matches):
-
-        start = match.start()
-
-        if i + 1 < len(matches):
-            end = matches[i + 1].start()
-        else:
-            end = len(raw_post)
-
-        block = raw_post[start:end].strip()
-
-        if block:
-            blocks.append(block)
-
-    return blocks
-
-# =========================================================
-# PAGINATION
-# =========================================================
-
-def get_total_pages(soup):
-
-    max_page = 1
-
-    for tag in soup.select("[data-page]"):
-
-        try:
-
-            page = int(tag.get("data-page"))
-
-            if page > max_page:
-                max_page = page
-
-        except:
-            pass
-
-    for link in soup.select("a[href*='page=']"):
-
-        href = link.get("href", "")
-
-        m = re.search(
-            r"[?&]page=(\d+)",
-            href
-        )
-
-        if m:
-
-            page = int(m.group(1))
-
-            if page > max_page:
-                max_page = page
-
-    for link in soup.select("a[href*='/page/']"):
-
-        href = link.get("href", "")
-
-        m = re.search(
-            r"/page/(\d+)",
-            href
-        )
-
-        if m:
-
-            page = int(m.group(1))
-
-            if page > max_page:
-                max_page = page
-
-    return max_page
-
-
-def get_page_url(base_url, page):
-
-    if page <= 1:
-        return base_url
-
-    if base_url.endswith("/"):
-        return f"{base_url}page/{page}/"
-
-    return f"{base_url}/page/{page}/"
 
 # =========================================================
 # SUPABASE REQUESTS
@@ -530,25 +584,9 @@ def scrape_source(source):
 
     soup = BeautifulSoup(r.text, "html.parser")
 
-    print("==================================================")
-    print("PAGINATION DEBUG")
-    print("==================================================")
-
-    pagination_links = soup.select("a[href]")
-
-    for link in pagination_links[:200]:
-
-        href = link.get("href", "")
-
-        if "page" in href.lower():
-
-            print(href)
-
     total_pages = get_total_pages(soup)
 
-    print("==================================================")
-    print(f"TOTAL PAGES DETECTED: {total_pages}")
-    print("==================================================")
+    print(f"TOTAL PAGES: {total_pages}")
 
     for page in range(1, total_pages + 1):
 
@@ -584,55 +622,98 @@ def scrape_source(source):
             if not raw_post:
                 continue
 
-            # =====================================================
+            # =================================================
             # AUTHOR / DATE
-            # =====================================================
-
-            author_tag = article.select_one(
-                ".ipsType_break.ipsContained a"
-            )
+            # =================================================
 
             post_author = None
-
-            if author_tag:
-                post_author = clean(
-                    author_tag.get_text()
-                )
-
-            time_tag = article.select_one("time")
-
             post_date = None
 
-            if time_tag:
+            author_el = article.select_one(
+                ".ipsType_break"
+            )
 
-                post_date = (
-                    time_tag.get("datetime")
-                    or clean(time_tag.get_text())
+            if author_el:
+                post_author = clean(
+                    author_el.get_text(" ", strip=True)
                 )
 
-            # =====================================================
-            # SPLIT MULTI BASE POSTS
-            # =====================================================
+            time_el = article.select_one("time")
 
-            blocks = split_into_base_blocks(raw_post)
+            if time_el:
 
-            for block in blocks:
+                post_date = (
+                    time_el.get("datetime")
+                    or clean(
+                        time_el.get_text(" ", strip=True)
+                    )
+                )
+
+            # =================================================
+            # MULTI-ENTRY SUPPORT
+            # =================================================
+
+            chunks = split_post_into_entries(raw_post)
+
+            for chunk in chunks:
 
                 parsed = {}
 
-                for key, label in source["fields"].items():
-
-                    value = extract_field(block, label)
-
-                    parsed[key] = value
-
-                parsed["supergroup_name"] = sanitize_supergroup_name(
-                    parsed.get("supergroup_name")
+                parsed["supergroup_name"] = extract_value_after_label(
+                    chunk,
+                    [
+                        "Supergroup Name",
+                        "Base or SG Name"
+                    ]
                 )
+
+                parsed["shard"] = extract_value_after_label(
+                    chunk,
+                    [
+                        "Shard/Server",
+                        "Shard",
+                        "Server"
+                    ]
+                )
+
+                parsed["base_code"] = extract_value_after_label(
+                    chunk,
+                    [
+                        "Base Code",
+                        "Passcode"
+                    ]
+                )
+
+                parsed["category"] = extract_value_after_label(
+                    chunk,
+                    [
+                        "Category to list base in",
+                        "Category for Contest"
+                    ]
+                )
+
+                parsed["description"] = extract_description(chunk)
+
+                # =================================================
+                # FIX NAME EXTRACTION
+                # =================================================
+
+                if parsed.get("supergroup_name"):
+
+                    parsed["supergroup_name"] = (
+                        parsed["supergroup_name"]
+                        .split("Shard/Server")[0]
+                        .split("Shard")[0]
+                        .strip(" :-")
+                    )
+
+                # =================================================
+                # SERVER
+                # =================================================
 
                 if not parsed.get("shard"):
 
-                    inferred_server = extract_server_from_text(block)
+                    inferred_server = extract_server_from_text(chunk)
 
                     if inferred_server:
                         parsed["shard"] = inferred_server
@@ -640,6 +721,10 @@ def scrape_source(source):
                 parsed["shard"] = normalize_server(
                     parsed.get("shard")
                 )
+
+                # =================================================
+                # CATEGORY
+                # =================================================
 
                 parsed["category"] = sanitize_category(
                     parsed.get("category")
@@ -658,7 +743,9 @@ def scrape_source(source):
                 ):
                     parsed["category"] = "Thematic Contest"
 
-                parsed["description"] = extract_description(block)
+                # =================================================
+                # METADATA
+                # =================================================
 
                 parsed["source_url"] = page_url
 
@@ -674,27 +761,15 @@ def scrape_source(source):
 
                 parsed["event_type"] = source["event_type"]
 
-                parsed["raw_post"] = block
+                parsed["raw_post"] = chunk
 
                 parsed["post_author"] = post_author
 
                 parsed["post_date"] = post_date
 
-                template_values = [
-
-                    "Shard/Server",
-                    "Base Code",
-                    "Category to list base in",
-                    "Passcode",
-                    "Shard",
-                    "Category for Contest"
-                ]
-
-                if (
-                    parsed.get("shard") in template_values
-                    or parsed.get("base_code") in template_values
-                ):
-                    continue
+                # =================================================
+                # VALIDATION
+                # =================================================
 
                 if not parsed.get("supergroup_name"):
                     continue
