@@ -160,6 +160,10 @@ def extract_server_from_text(text):
     return None
 
 
+# =========================================================
+# CATEGORY CLEANER
+# =========================================================
+
 def sanitize_category(category):
 
     if not category:
@@ -167,51 +171,70 @@ def sanitize_category(category):
 
     category = clean(category)
 
-    category = category.replace(
-        "\n",
-        " "
-    )
-
-    # =====================================================
-    # REMOVE EVERYTHING AFTER EXPLANATIONS
-    # =====================================================
+    # -----------------------------------------------------
+    # HARD STOPS
+    # -----------------------------------------------------
 
     STOP_PATTERNS = [
 
-        r"\bfor those interested\b",
-        r"\barea of interest\b",
-        r"\bso, clubs and venues\b",
-        r"\bi thought it was\b",
-        r"\bthink i technically\b",
-        r"\bhaven't put this\b",
-        r"\bi can't show\b",
-        r"\bits a small but functional\b",
-        r"\bwhich, i list things\b",
-        r"\bfeel free to relocate\b",
-        r"\bmust have water effects\b",
-        r"\bimportant\b",
-        r"\bthere are other restaurants\b"
-
+        r"special or hidden features",
+        r"is flight or teleportation useful",
+        r"additional info",
+        r"must-see areas",
+        r"edited",
+        r"base services",
+        r"setting to",
+        r"for those interested",
+        r"i can't show",
+        r"its a small but functional",
+        r"haven't put this",
+        r"which, i list things",
+        r"so, clubs and venues",
+        r"the area of interest",
+        r"important !!!",
+        r"water looks terrible",
+        r"feel free to relocate",
+        r"think i technically qualify",
+        r"i thought it was over",
+        r"description",
+        r"posted"
     ]
 
-    lowered = category.lower()
+    lower = category.lower()
+
+    cut_positions = []
 
     for pattern in STOP_PATTERNS:
 
-        match = re.search(
-            pattern,
-            lowered,
-            re.IGNORECASE
-        )
+        m = re.search(pattern, lower)
 
-        if match:
+        if m:
+            cut_positions.append(m.start())
 
-            category = category[:match.start()].strip()
-            lowered = category.lower()
+    if cut_positions:
+        category = category[:min(cut_positions)].strip()
 
-    # =====================================================
+    # -----------------------------------------------------
+    # FIX "or maybe"
+    # -----------------------------------------------------
+
+    category = re.sub(
+        r"\s+or maybe.*",
+        "",
+        category,
+        flags=re.IGNORECASE
+    )
+
+    category = re.sub(
+        r"\s+or.*",
+        "",
+        category,
+        flags=re.IGNORECASE
+    )
+
+    # -----------------------------------------------------
     # REMOVE PARENTHESIS
-    # =====================================================
+    # -----------------------------------------------------
 
     category = re.sub(
         r"\(.*?\)",
@@ -219,89 +242,115 @@ def sanitize_category(category):
         category
     )
 
-    # =====================================================
-    # SPECIAL FIXES
-    # =====================================================
+    # -----------------------------------------------------
+    # NORMALIZE SLASHES
+    # -----------------------------------------------------
 
-    special_map = {
-
-        "realism or maybe other misc": "Realism",
-
-        "clubs and venues": "Clubs And Venues",
-
-        "tech sci-fi": "Tech Sci-Fi",
-        "tech/sci-fi": "Tech Sci-Fi",
-
-        "fantasy arcane": "Fantasy Arcane",
-        "fantasy/arcane": "Fantasy Arcane",
-
-        "other misc": "Other Misc",
-        "other/misc": "Other Misc"
-
-    }
-
-    lowered = category.lower().strip()
-
-    if lowered in special_map:
-        category = special_map[lowered]
-
-    # =====================================================
-    # HANDLE SLASHES
-    # =====================================================
-
-    if "/" in category:
-
-        parts = [
-            clean(p)
-            for p in category.split("/")
-            if clean(p)
-        ]
-
-        if parts:
-            category = parts[0]
-
-    # =====================================================
-    # REMOVE TRAILING NUMBERS
-    # =====================================================
-
-    category = re.sub(
-        r"\s+\d+$",
-        "",
-        category
+    category = category.replace(
+        "Tech/Sci-Fi",
+        "Tech Sci-Fi"
     )
 
-    # =====================================================
-    # REMOVE "ITEMS"
-    # =====================================================
-
-    category = re.sub(
-        r"\bitems\b",
-        "",
-        category,
-        flags=re.IGNORECASE
+    category = category.replace(
+        "Fantasy/Arcane",
+        "Fantasy Arcane"
     )
 
-    # =====================================================
-    # NORMALIZE UNDER / OVER
-    # =====================================================
+    category = category.replace(
+        "Other/Misc",
+        "Other Misc"
+    )
+
+    # -----------------------------------------------------
+    # FIX UNDER/OVER ITEMS
+    # -----------------------------------------------------
 
     category = re.sub(
-        r"under\s+7k",
+        r"\bunder\s+7k\s+items\b",
         "Under 7K",
         category,
         flags=re.IGNORECASE
     )
 
     category = re.sub(
-        r"over\s+7k",
+        r"\bover\s+7k\s+items\b",
         "Over 7K",
         category,
         flags=re.IGNORECASE
     )
 
-    # =====================================================
-    # REMOVE DOUBLE SPACES
-    # =====================================================
+    category = re.sub(
+        r"\bunder\s+7k\b",
+        "Under 7K",
+        category,
+        flags=re.IGNORECASE
+    )
+
+    category = re.sub(
+        r"\bover\s+7k\b",
+        "Over 7K",
+        category,
+        flags=re.IGNORECASE
+    )
+
+    category = re.sub(
+        r"\s+2$",
+        "",
+        category
+    )
+
+    # -----------------------------------------------------
+    # SPECIFIC FIXES
+    # -----------------------------------------------------
+
+    SPECIFIC = {
+
+        "clubs and venues": "Clubs And Venues",
+        "club and venues": "Clubs And Venues",
+
+        "sci-fi": "Sci-Fi",
+        "science": "Science",
+
+        "realism": "Realism",
+
+        "functional": "Functional",
+
+        "seasonal": "Seasonal",
+
+        "free form": "Freeform",
+        "freeform": "Freeform",
+
+        "supergroup headquarters": "Supergroup Headquarters",
+
+        "tech sci-fi": "Tech Sci-Fi",
+
+        "fantasy arcane": "Fantasy Arcane",
+
+        "other misc": "Other Misc",
+
+        "rp base under 7k": "RP Base Under 7K",
+
+        "multipurpose base under 7k": "Multipurpose Base Under 7K",
+
+        "multipurpose base over 7k": "Multipurpose Base Over 7K",
+
+        "decorated utility base under 7k":
+            "Decorated Utility Base Under 7K",
+
+        "decorated utility base over 7k":
+            "Decorated Utility Base Over 7K"
+    }
+
+    key = category.lower().strip(" :-/")
+
+    if key in SPECIFIC:
+        return SPECIFIC[key]
+
+    # -----------------------------------------------------
+    # FINAL CLEAN
+    # -----------------------------------------------------
+
+    category = category.strip(" :-/,")
 
     category = re.sub(
         r"\s+",
@@ -309,133 +358,119 @@ def sanitize_category(category):
         category
     )
 
-    category = category.strip(" :-,.;")
-
-    # =====================================================
-    # TITLE CASE
-    # =====================================================
-
-    words = []
-
-    for word in category.split():
-
-        if word.upper() in ["RP", "WIP", "7K"]:
-            words.append(word.upper())
-
-        else:
-            words.append(word.capitalize())
-
-    category = " ".join(words)
-
-    # =====================================================
-    # FINAL CATEGORY FUSIONS
-    # =====================================================
-
-    fusion_map = {
-
-        "Decorated Utility Base Under 7K":
-            "Decorated Utility Base Under 7K",
-
-        "Decorated Utility Base Under 7K Items":
-            "Decorated Utility Base Under 7K",
-
-        "Decorated Utility Base Over 7K":
-            "Decorated Utility Base Over 7K",
-
-        "Decorated Utility Base Over 7K Items":
-            "Decorated Utility Base Over 7K",
-
-        "Multipurpose Base Under 7K":
-            "Multipurpose Base Under 7K",
-
-        "Multipurpose Base Under 7K Items":
-            "Multipurpose Base Under 7K",
-
-        "Multipurpose Base Over 7K":
-            "Multipurpose Base Over 7K",
-
-        "Multipurpose Base Over 7K Items":
-            "Multipurpose Base Over 7K",
-
-        "RP Base Under 7K":
-            "RP Base Under 7K",
-
-        "RP Base Under 7K Items":
-            "RP Base Under 7K",
-
-        "RP Base Over 7K":
-            "RP Base Over 7K",
-
-        "RP Base Over 7K Items":
-            "RP Base Over 7K"
-
-    }
-
-    if category in fusion_map:
-        category = fusion_map[category]
-
-    return clean(category)
-
-
-def extract_field(raw_text, label):
-
-    relaxed_label = ""
-
-    for char in label:
-
-        if char.isalpha():
-            relaxed_label += char + r"\s*"
-        else:
-            relaxed_label += re.escape(char)
-
-    pattern = (
-        relaxed_label
-        + r"\s*(.*?)"
-        + r"(?=\n(?:[A-Z][A-Za-z /&]{2,40}:)|\Z)"
-    )
-
-    match = re.search(
-        pattern,
-        raw_text,
-        re.IGNORECASE | re.DOTALL
-    )
-
-    if not match:
+    if not category:
         return None
 
-    value = clean(match.group(1))
-
-    value = value.split("\n")[0].strip()
-
-    if label.lower().startswith("supergroup"):
-
-        value = re.split(
-            r"Shard/Server|Base Code|Passcode",
-            value,
-            flags=re.IGNORECASE
-        )[0].strip()
-
-    return value
+    return category.title()
 
 
-def extract_description(raw_text):
+# =========================================================
+# FIELD EXTRACTION
+# =========================================================
 
-    match = re.search(
-        r"Description\s*:?\s*(.*?)(?=Edited|$)",
-        raw_text,
-        re.IGNORECASE | re.DOTALL
+def extract_field(block, labels):
+
+    if isinstance(labels, str):
+        labels = [labels]
+
+    ALL_LABELS = [
+
+        "Supergroup Name",
+        "Base or SG Name",
+        "Shard",
+        "Shard/Server",
+        "Server",
+        "Passcode",
+        "Base Code",
+        "Category for Contest",
+        "Category to list base in",
+        "Description",
+        "Special or Hidden Features",
+        "Is flight or teleportation useful or needed in this base"
+    ]
+
+    for label in labels:
+
+        escaped = re.escape(label)
+
+        pattern = (
+            rf"{escaped}\s*:?\s*(.*?)"
+            rf"(?=\n(?:{'|'.join(map(re.escape, ALL_LABELS))})\s*:|\Z)"
+        )
+
+        match = re.search(
+            pattern,
+            block,
+            re.IGNORECASE | re.DOTALL
+        )
+
+        if match:
+
+            value = clean(match.group(1))
+
+            if value:
+                return value
+
+    return None
+
+
+def extract_description(block):
+
+    desc = extract_field(
+        block,
+        "Description"
     )
-
-    if not match:
-        return None
-
-    desc = clean(match.group(1))
 
     if not desc:
         return None
 
-    return desc
+    return clean(desc)
 
+
+# =========================================================
+# MULTI-BASE SPLIT
+# =========================================================
+
+def split_post_into_blocks(raw_post):
+
+    pattern = re.compile(
+
+        r"(?=("
+        r"Supergroup Name\s*:|"
+        r"Base or SG Name\s*:)"
+        r")",
+
+        re.IGNORECASE
+    )
+
+    matches = list(pattern.finditer(raw_post))
+
+    if not matches:
+        return [raw_post]
+
+    chunks = []
+
+    for i, match in enumerate(matches):
+
+        start = match.start()
+
+        end = (
+            matches[i + 1].start()
+            if i + 1 < len(matches)
+            else len(raw_post)
+        )
+
+        chunk = raw_post[start:end].strip()
+
+        if chunk:
+            chunks.append(chunk)
+
+    return chunks
+
+
+# =========================================================
+# PAGINATION
+# =========================================================
 
 def get_total_pages(soup):
 
@@ -445,14 +480,14 @@ def get_total_pages(soup):
 
         href = link.get("href", "")
 
-        matches = re.findall(
-            r"/page/(\d+)",
+        m = re.search(
+            r"/page/(\d+)/",
             href
         )
 
-        for m in matches:
+        if m:
 
-            page = int(m)
+            page = int(m.group(1))
 
             if page > max_page:
                 max_page = page
@@ -463,43 +498,16 @@ def get_total_pages(soup):
 def get_page_url(base_url, page):
 
     if page <= 1:
-        return base_url.rstrip("/")
+        return base_url
 
-    return f"{base_url.rstrip('/')}/page/{page}/"
+    if base_url.endswith("/"):
+        return f"{base_url}page/{page}/"
 
+    return f"{base_url}/page/{page}/"
 
-def split_multiple_bases(raw_post):
-
-    pattern = re.compile(
-        r"(Supergroup Name\s*:?)",
-        re.IGNORECASE
-    )
-
-    matches = list(pattern.finditer(raw_post))
-
-    if len(matches) <= 1:
-        return [raw_post]
-
-    chunks = []
-
-    for i, match in enumerate(matches):
-
-        start = match.start()
-
-        if i + 1 < len(matches):
-            end = matches[i + 1].start()
-        else:
-            end = len(raw_post)
-
-        chunk = raw_post[start:end].strip()
-
-        if chunk:
-            chunks.append(chunk)
-
-    return chunks
 
 # =========================================================
-# SUPABASE REQUESTS
+# SUPABASE
 # =========================================================
 
 def upsert_base(data):
@@ -552,6 +560,7 @@ def purge_old_bases():
 
     if r.status_code >= 400:
         print(r.text)
+
 
 # =========================================================
 # SCRAPER
@@ -624,41 +633,68 @@ def scrape_source(source):
             author = None
 
             author_tag = article.select_one(
-                ".ipsType_break"
+                "[data-role='commentAuthor']"
             )
 
             if author_tag:
                 author = clean(author_tag.get_text())
 
-            date = None
+            post_date = None
 
             time_tag = article.select_one("time")
 
             if time_tag:
 
-                date = (
+                post_date = (
                     time_tag.get("datetime")
                     or clean(time_tag.get_text())
                 )
 
-            chunks = split_multiple_bases(raw_post)
+            blocks = split_post_into_blocks(raw_post)
 
-            for chunk in chunks:
+            for block in blocks:
 
                 parsed = {}
 
-                for key, label in source["fields"].items():
+                parsed["supergroup_name"] = extract_field(
+                    block,
+                    [
+                        "Supergroup Name",
+                        "Base or SG Name"
+                    ]
+                )
 
-                    value = extract_field(chunk, label)
+                parsed["shard"] = extract_field(
+                    block,
+                    [
+                        "Shard/Server",
+                        "Shard",
+                        "Server"
+                    ]
+                )
 
-                    parsed[key] = value
+                parsed["base_code"] = extract_field(
+                    block,
+                    [
+                        "Passcode",
+                        "Base Code"
+                    ]
+                )
+
+                parsed["category"] = extract_field(
+                    block,
+                    [
+                        "Category to list base in",
+                        "Category for Contest"
+                    ]
+                )
 
                 if not parsed.get("shard"):
 
-                    inferred_server = extract_server_from_text(chunk)
+                    inferred = extract_server_from_text(block)
 
-                    if inferred_server:
-                        parsed["shard"] = inferred_server
+                    if inferred:
+                        parsed["shard"] = inferred
 
                 parsed["shard"] = normalize_server(
                     parsed.get("shard")
@@ -668,20 +704,11 @@ def scrape_source(source):
                     parsed.get("category")
                 )
 
-                if (
-                    source["event_type"] == "contest"
-                    and (
-                        not parsed.get("category")
-                        or parsed["category"].lower() in [
-                            "unknown",
-                            "n/a",
-                            "none"
-                        ]
-                    )
-                ):
-                    parsed["category"] = "Thematic Contest"
+                parsed["description"] = extract_description(block)
 
-                parsed["description"] = extract_description(chunk)
+                parsed["post_author"] = author
+
+                parsed["post_date"] = post_date
 
                 parsed["source_url"] = page_url
 
@@ -697,38 +724,18 @@ def scrape_source(source):
 
                 parsed["event_type"] = source["event_type"]
 
-                parsed["post_author"] = author
-
-                parsed["post_date"] = date
-
-                parsed["raw_post"] = chunk
-
-                template_values = [
-
-                    "Shard/Server",
-                    "Base Code",
-                    "Category to list base in",
-                    "Passcode",
-                    "Shard",
-                    "Category for Contest"
-                ]
-
-                if (
-                    parsed.get("shard") in template_values
-                    or parsed.get("base_code") in template_values
-                ):
-                    continue
+                parsed["raw_post"] = block
 
                 if not parsed.get("supergroup_name"):
+                    continue
+
+                if not parsed.get("base_code"):
                     continue
 
                 if not parsed.get("shard"):
                     continue
 
                 if parsed["shard"] not in VALID_SHARDS:
-                    continue
-
-                if not parsed.get("base_code"):
                     continue
 
                 parsed["base_code"] = clean(
@@ -759,6 +766,7 @@ def scrape_source(source):
                     TOTAL_UPSERTED += 1
 
                     print("UPSERTED")
+
 
 # =========================================================
 # MAIN
