@@ -311,10 +311,6 @@ def clean_category(raw):
 
     lower = category.lower()
 
-    # =====================================================
-    # SPECIAL FIXES
-    # =====================================================
-
     if "way under 7000" in lower:
         return "Utility Under 7000"
 
@@ -587,6 +583,12 @@ def scrape_source(source):
 
     print(f"TOTAL PAGES: {total_pages}")
 
+    source_topic = (
+        topic_url
+        .split("/topic/")[1]
+        .split("/")[0]
+    )
+
     for page in range(1, total_pages + 1):
 
         page_url = get_page_url(topic_url, page)
@@ -657,6 +659,8 @@ def scrape_source(source):
                 parsed["source_url"] = page_url
 
                 parsed["source_page"] = page
+
+                parsed["source_topic"] = source_topic
 
                 parsed["event_name"] = source["event_name"]
 
