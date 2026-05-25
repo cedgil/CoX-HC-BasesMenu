@@ -59,58 +59,88 @@ SERVER_MAP = {
 CATEGORY_ALIASES = {
 
     # =====================================================
-    # TECH / SCI-FI
-    # =====================================================
-
-    "Tech Sci-Fi": "Tech/Sci-Fi",
-    "Tech / Sci-Fi": "Tech/Sci-Fi",
-    "Tech/Sci-Fi": "Tech/Sci-Fi",
-
-    "Sci-Fi": "Tech/Sci-Fi",
-    "Sci Fi": "Tech/Sci-Fi",
-    "Science Fiction": "Tech/Sci-Fi",
-
-    # =====================================================
     # FREEFORM
     # =====================================================
 
-    "Freeform": "Freeform",
-    "Free Form": "Freeform",
-    "Free form": "Freeform",
+    "freeform": "Freeform",
+    "free form": "Freeform",
+    "free-form": "Freeform",
+    "free form and venue": "Freeform",
 
     # =====================================================
-    # OTHER / MISC
+    # TECH SCI-FI
     # =====================================================
 
-    "Other Misc": "Other/Misc",
-    "Other / Misc": "Other/Misc",
-    "Other / Misc.": "Other/Misc",
-
-    "Other Miscellaneous": "Other/Misc",
-    "Other / Miscellaneous": "Other/Misc",
-    "Other/Miscellaneous": "Other/Misc",
-
-    "Misc": "Other/Misc",
-    "Misc.": "Other/Misc",
-    "Miscellaneous": "Other/Misc",
+    "tech sci-fi": "Tech/Sci-Fi",
+    "tech / sci-fi": "Tech/Sci-Fi",
+    "tech/sci-fi": "Tech/Sci-Fi",
+    "sci-fi": "Tech/Sci-Fi",
+    "science fiction": "Tech/Sci-Fi",
 
     # =====================================================
-    # FANTASY
+    # FANTASY ARCANE
     # =====================================================
 
-    "Fantasy Arcane": "Fantasy/Arcane",
-    "Fantasy / Arcane": "Fantasy/Arcane",
-    "Fantasy/Arcane": "Fantasy/Arcane",
+    "fantasy arcane": "Fantasy/Arcane",
+    "fantasy / arcane": "Fantasy/Arcane",
+    "fantasy/arcane": "Fantasy/Arcane",
+
+    # =====================================================
+    # OTHER MISC
+    # =====================================================
+
+    "other misc": "Other/Misc",
+    "other / misc": "Other/Misc",
+    "other/misc": "Other/Misc",
+    "other miscellaneous": "Other/Misc",
+    "other / miscellaneous": "Other/Misc",
+    "other/miscellaneous": "Other/Misc",
+    "misc": "Other/Misc",
+    "misc.": "Other/Misc",
+    "miscellaneous": "Other/Misc",
+
+    # =====================================================
+    # CLUBS
+    # =====================================================
+
+    "clubs and venues": "Clubs and Venues",
+    "club and venues": "Clubs and Venues",
 
     # =====================================================
     # UTILITY
     # =====================================================
 
-    "Utility Way Under 7000": "Utility Under 7000",
-    "Utility Under 7000": "Utility Under 7000",
+    "utility under 7000": "Utility Under 7000",
+    "utility way under 7000": "Utility Under 7000",
+    "decorated utility base under 7k": "Decorated Utility Base Under 7K",
+    "decorated utility base over 7k": "Decorated Utility Base Over 7K",
 
-    "Decorated Utility Base Under 7K": "Utility Under 7000",
-    "Decorated Utility Base Over 7K": "Utility Over 7000"
+    # =====================================================
+    # MULTIPURPOSE
+    # =====================================================
+
+    "multipurpose base under 7k": "Multipurpose Base Under 7K",
+    "multipurpose base under 7k items": "Multipurpose Base Under 7K",
+
+    "multipurpose base over 7k": "Multipurpose Base Over 7K",
+    "multipurpose base over 7k items": "Multipurpose Base Over 7K",
+
+    # =====================================================
+    # RP
+    # =====================================================
+
+    "rp base under 7k": "RP Base Under 7K",
+    "rp base under 7k items": "RP Base Under 7K",
+
+    "rp base over 7k": "RP Base Over 7K",
+    "rp base over 7k items": "RP Base Over 7K",
+
+    # =====================================================
+    # SUPERGROUP HQ
+    # =====================================================
+
+    "supergroup headquarters": "Supergroup Headquarters",
+    "supergroup headquarters.": "Supergroup Headquarters",
 }
 
 # =========================================================
@@ -221,6 +251,171 @@ def extract_server_from_text(text):
     return None
 
 
+# =========================================================
+# CATEGORY CLEANUP
+# =========================================================
+
+CATEGORY_STOP_MARKERS = [
+
+    "special or hidden features",
+    "is flight or teleportation",
+    "additional info",
+    "must-see areas",
+    "must see areas",
+    "other associated contributors",
+    "contributing builders",
+    "description",
+    "edited",
+    "posted",
+    "setting to",
+    "for those interested in lore",
+    "area of interest",
+    "i can't show a lot because",
+    "important !!!",
+    "definitely a base that is not going",
+    "home and living design",
+    "feel free to relocate",
+]
+
+
+def normalize_category(category):
+
+    if not category:
+        return None
+
+    category = clean(category)
+
+    category = re.sub(
+        r"\s+",
+        " ",
+        category
+    ).strip()
+
+    lower = category.lower()
+
+    # =====================================================
+    # STOP MARKERS
+    # =====================================================
+
+    for marker in CATEGORY_STOP_MARKERS:
+
+        idx = lower.find(marker)
+
+        if idx > 0:
+
+            category = category[:idx].strip()
+            lower = category.lower()
+
+    # =====================================================
+    # PARENTHESIS
+    # =====================================================
+
+    category = re.sub(
+        r"\(.*?\)",
+        "",
+        category
+    ).strip()
+
+    lower = category.lower()
+
+    # =====================================================
+    # SPECIAL FIXES
+    # =====================================================
+
+    if "realism" in lower:
+        return "Realism"
+
+    if "clubs and venues" in lower:
+        return "Clubs and Venues"
+
+    if "free form" in lower or "freeform" in lower:
+        return "Freeform"
+
+    if (
+        "other" in lower
+        and (
+            "misc" in lower
+            or "miscellaneous" in lower
+        )
+    ):
+        return "Other/Misc"
+
+    if (
+        "utility" in lower
+        and "7000" in lower
+    ):
+        return "Utility Under 7000"
+
+    # =====================================================
+    # ALIASES
+    # =====================================================
+
+    alias = CATEGORY_ALIASES.get(lower)
+
+    if alias:
+        return alias
+
+    # =====================================================
+    # PREFIX MATCH
+    # =====================================================
+
+    for alias_key, alias_value in CATEGORY_ALIASES.items():
+
+        if lower.startswith(alias_key):
+            return alias_value
+
+    return category.title()
+
+
+# =========================================================
+# FIELD EXTRACTION
+# =========================================================
+
+def extract_field(raw_text, label):
+
+    pattern = (
+        re.escape(label)
+        + r"\s*(.*?)"
+        + r"(?=\n[A-Z][^\n]{0,60}:|\Z)"
+    )
+
+    match = re.search(
+        pattern,
+        raw_text,
+        re.IGNORECASE | re.DOTALL
+    )
+
+    if not match:
+        return None
+
+    value = clean(match.group(1))
+
+    return value
+
+
+def extract_description(raw_text):
+
+    match = re.search(
+        r"Description\s*:?\s*(.*?)(?=Edited|$)",
+        raw_text,
+        re.IGNORECASE | re.DOTALL
+    )
+
+    if not match:
+        return None
+
+    desc = clean(match.group(1))
+
+    if not desc:
+        return None
+
+    return desc
+
+
+# =========================================================
+# PAGINATION
+# =========================================================
+
 def get_total_pages(soup):
 
     max_page = 1
@@ -229,7 +424,10 @@ def get_total_pages(soup):
 
         href = a.get("href", "")
 
-        m = re.search(r"/page/(\d+)/", href)
+        m = re.search(
+            r"/page/(\d+)/",
+            href
+        )
 
         if m:
 
@@ -246,205 +444,11 @@ def get_page_url(base_url, page):
     if page <= 1:
         return base_url
 
-    return base_url.rstrip("/") + f"/page/{page}/"
+    if not base_url.endswith("/"):
+        base_url += "/"
 
-# =========================================================
-# CATEGORY CLEANING
-# =========================================================
+    return f"{base_url}page/{page}/"
 
-STOP_PATTERNS = [
-
-    r"Special or Hidden Features.*",
-    r"Is flight or teleportation.*",
-    r"Additional Info.*",
-    r"Must-See Areas.*",
-    r"Other associated contributors.*",
-    r"Contributing builders.*",
-    r"Edited.*",
-    r"Posted.*",
-    r"Area of interest.*",
-    r"For those interested in lore.*",
-    r"So, Clubs and Venues.*",
-    r"I can't show a lot because.*",
-    r"Haven't put this in the base registry.*",
-    r"It's a small but functional base.*"
-]
-
-
-def clean_category(raw):
-
-    if not raw:
-        return None
-
-    category = clean(raw)
-
-    for pattern in STOP_PATTERNS:
-
-        category = re.sub(
-            pattern,
-            "",
-            category,
-            flags=re.IGNORECASE
-        )
-
-    category = category.strip(" :-.,;/")
-
-    category = re.sub(
-        r"\s+items?$",
-        "",
-        category,
-        flags=re.IGNORECASE
-    )
-
-    category = re.sub(
-        r"\s+2$",
-        "",
-        category
-    )
-
-    category = re.sub(
-        r"\s+The$",
-        "",
-        category,
-        flags=re.IGNORECASE
-    )
-
-    lower = category.lower()
-
-    if "way under 7000" in lower:
-        return "Utility Under 7000"
-
-    if "other / misc" in lower:
-        return "Other/Misc"
-
-    if "miscellaneous" in lower:
-        return "Other/Misc"
-
-    if "free form" in lower:
-        return "Freeform"
-
-    if "freeform" in lower:
-        return "Freeform"
-
-    if "sci-fi" in lower:
-        return "Tech/Sci-Fi"
-
-    if "tech / sci-fi" in lower:
-        return "Tech/Sci-Fi"
-
-    if "tech/sci-fi" in lower:
-        return "Tech/Sci-Fi"
-
-    return category.strip()
-
-
-def normalize_category(category):
-
-    if not category:
-        return None
-
-    category = clean_category(category)
-
-    if not category:
-        return None
-
-    for alias, target in CATEGORY_ALIASES.items():
-
-        if category.lower() == alias.lower():
-            return target
-
-    return category
-
-
-def resolve_category(raw_category, allowed_categories):
-
-    category = normalize_category(raw_category)
-
-    if not category:
-        return None
-
-    if not allowed_categories:
-        return category
-
-    for allowed in allowed_categories:
-
-        if category.lower() == allowed.lower():
-            return allowed
-
-    for allowed in allowed_categories:
-
-        if category.lower().startswith(allowed.lower()):
-            return allowed
-
-    return category
-
-# =========================================================
-# FIELD EXTRACTION
-# =========================================================
-
-def extract_field(text, label):
-
-    if not label:
-        return None
-
-    pattern = (
-        re.escape(label)
-        + r"\s*(.*?)"
-        + r"(?=\n[A-Z][^:\n]{1,80}:|\Z)"
-    )
-
-    m = re.search(
-        pattern,
-        text,
-        re.IGNORECASE | re.DOTALL
-    )
-
-    if not m:
-        return None
-
-    value = clean(m.group(1))
-
-    value = value.split("\n")[0].strip()
-
-    return value
-
-
-def extract_post_author(article):
-
-    selectors = [
-
-        ".ipsType_break",
-        ".cAuthorPane_author strong",
-        ".ipsType_sectionHead"
-    ]
-
-    for selector in selectors:
-
-        el = article.select_one(selector)
-
-        if el:
-
-            value = clean(el.get_text())
-
-            if value:
-                return value
-
-    return None
-
-
-def extract_post_date(article):
-
-    time_el = article.select_one("time")
-
-    if not time_el:
-        return None
-
-    value = (
-        time_el.get("datetime")
-        or time_el.get_text(strip=True)
-    )
-
-    return clean(value)
 
 # =========================================================
 # SUPABASE
@@ -498,62 +502,39 @@ def purge_old_bases():
 
     print(f"PURGE STATUS: {r.status_code}")
 
+    if r.status_code >= 400:
+        print(r.text)
+
+# =========================================================
+# SPLIT MULTI-BASE POSTS
+# =========================================================
+
+def split_post_into_entries(raw_post):
+
+    chunks = re.split(
+        r"(?=Supergroup Name:|Base or SG Name:|Your base’s name:)",
+        raw_post,
+        flags=re.IGNORECASE
+    )
+
+    cleaned = []
+
+    for chunk in chunks:
+
+        chunk = clean_multiline(chunk)
+
+        if not chunk:
+            continue
+
+        cleaned.append(chunk)
+
+    return cleaned
+
 # =========================================================
 # SCRAPER
 # =========================================================
 
 TOTAL_UPSERTED = 0
-
-
-def split_post_into_chunks(text):
-
-    markers = [
-
-        "Supergroup Name:",
-        "Base or SG Name:",
-        "Your base’s name:"
-    ]
-
-    positions = []
-
-    lower = text.lower()
-
-    for marker in markers:
-
-        idx = 0
-
-        while True:
-
-            pos = lower.find(marker.lower(), idx)
-
-            if pos == -1:
-                break
-
-            positions.append(pos)
-
-            idx = pos + 1
-
-    positions = sorted(set(positions))
-
-    if not positions:
-        return [text]
-
-    chunks = []
-
-    for i, pos in enumerate(positions):
-
-        end = (
-            positions[i + 1]
-            if i + 1 < len(positions)
-            else len(text)
-        )
-
-        chunk = text[pos:end].strip()
-
-        if chunk:
-            chunks.append(chunk)
-
-    return chunks
 
 
 def scrape_source(source):
@@ -582,12 +563,6 @@ def scrape_source(source):
     total_pages = get_total_pages(soup)
 
     print(f"TOTAL PAGES: {total_pages}")
-
-    source_topic = (
-        topic_url
-        .split("/topic/")[1]
-        .split("/")[0]
-    )
 
     for page in range(1, total_pages + 1):
 
@@ -623,50 +598,90 @@ def scrape_source(source):
             if not raw_post:
                 continue
 
-            chunks = split_post_into_chunks(raw_post)
+            # =================================================
+            # AUTHOR / DATE
+            # =================================================
 
-            for chunk in chunks:
+            post_author = None
+            post_date = None
+
+            author_el = article.select_one(
+                "[data-author]"
+            )
+
+            if author_el:
+                post_author = clean(
+                    author_el.get("data-author")
+                )
+
+            time_el = article.select_one("time")
+
+            if time_el:
+
+                post_date = (
+                    time_el.get("datetime")
+                    or clean(time_el.get_text())
+                )
+
+            # =================================================
+            # SPLIT MULTI BASE POSTS
+            # =================================================
+
+            entries = split_post_into_entries(raw_post)
+
+            for chunk in entries:
 
                 parsed = {}
 
                 for key, label in source["fields"].items():
 
-                    parsed[key] = extract_field(
+                    value = extract_field(
                         chunk,
                         label
                     )
 
+                    parsed[key] = value
+
                 if not parsed.get("shard"):
 
-                    inferred = extract_server_from_text(chunk)
+                    inferred_server = extract_server_from_text(chunk)
 
-                    if inferred:
-                        parsed["shard"] = inferred
+                    if inferred_server:
+                        parsed["shard"] = inferred_server
 
                 parsed["shard"] = normalize_server(
                     parsed.get("shard")
                 )
 
-                parsed["category"] = resolve_category(
-                    parsed.get("category"),
-                    source.get("allowed_categories", [])
+                parsed["category"] = normalize_category(
+                    parsed.get("category")
                 )
 
-                parsed["post_author"] = extract_post_author(article)
-
-                parsed["post_date"] = extract_post_date(article)
+                parsed["description"] = extract_description(chunk)
 
                 parsed["source_url"] = page_url
 
                 parsed["source_page"] = page
 
-                parsed["source_topic"] = source_topic
+                parsed["source_topic"] = (
+                    topic_url
+                    .split("/topic/")[1]
+                    .split("/")[0]
+                )
 
                 parsed["event_name"] = source["event_name"]
 
                 parsed["event_type"] = source["event_type"]
 
                 parsed["raw_post"] = chunk
+
+                parsed["post_author"] = post_author
+
+                parsed["post_date"] = post_date
+
+                # =============================================
+                # VALIDATION
+                # =============================================
 
                 if not parsed.get("supergroup_name"):
                     continue
@@ -691,7 +706,7 @@ def scrape_source(source):
                 )
 
                 if not re.match(
-                    r"^[A-Z0-9]+-[0-9]+$",
+                    r"^[A-Z0-9\-]+$",
                     parsed["base_code"],
                     re.IGNORECASE
                 ):
