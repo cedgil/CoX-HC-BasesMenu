@@ -58,12 +58,59 @@ SERVER_MAP = {
 
 CATEGORY_ALIASES = {
 
+    # =====================================================
+    # TECH / SCI-FI
+    # =====================================================
+
     "Tech Sci-Fi": "Tech/Sci-Fi",
+    "Tech / Sci-Fi": "Tech/Sci-Fi",
+    "Tech/Sci-Fi": "Tech/Sci-Fi",
+
     "Sci-Fi": "Tech/Sci-Fi",
+    "Sci Fi": "Tech/Sci-Fi",
+    "Science Fiction": "Tech/Sci-Fi",
+
+    # =====================================================
+    # FREEFORM
+    # =====================================================
+
+    "Freeform": "Freeform",
+    "Free Form": "Freeform",
+    "Free form": "Freeform",
+
+    # =====================================================
+    # OTHER / MISC
+    # =====================================================
 
     "Other Misc": "Other/Misc",
+    "Other / Misc": "Other/Misc",
+    "Other / Misc.": "Other/Misc",
 
-    "Fantasy Arcane": "Fantasy/Arcane"
+    "Other Miscellaneous": "Other/Misc",
+    "Other / Miscellaneous": "Other/Misc",
+    "Other/Miscellaneous": "Other/Misc",
+
+    "Misc": "Other/Misc",
+    "Misc.": "Other/Misc",
+    "Miscellaneous": "Other/Misc",
+
+    # =====================================================
+    # FANTASY
+    # =====================================================
+
+    "Fantasy Arcane": "Fantasy/Arcane",
+    "Fantasy / Arcane": "Fantasy/Arcane",
+    "Fantasy/Arcane": "Fantasy/Arcane",
+
+    # =====================================================
+    # UTILITY
+    # =====================================================
+
+    "Utility Way Under 7000": "Utility Under 7000",
+    "Utility Under 7000": "Utility Under 7000",
+
+    "Decorated Utility Base Under 7K": "Utility Under 7000",
+    "Decorated Utility Base Over 7K": "Utility Over 7000"
 }
 
 # =========================================================
@@ -201,7 +248,6 @@ def get_page_url(base_url, page):
 
     return base_url.rstrip("/") + f"/page/{page}/"
 
-
 # =========================================================
 # CATEGORY CLEANING
 # =========================================================
@@ -263,9 +309,37 @@ def clean_category(raw):
         flags=re.IGNORECASE
     )
 
-    category = category.strip()
+    lower = category.lower()
 
-    return category
+    # =====================================================
+    # SPECIAL FIXES
+    # =====================================================
+
+    if "way under 7000" in lower:
+        return "Utility Under 7000"
+
+    if "other / misc" in lower:
+        return "Other/Misc"
+
+    if "miscellaneous" in lower:
+        return "Other/Misc"
+
+    if "free form" in lower:
+        return "Freeform"
+
+    if "freeform" in lower:
+        return "Freeform"
+
+    if "sci-fi" in lower:
+        return "Tech/Sci-Fi"
+
+    if "tech / sci-fi" in lower:
+        return "Tech/Sci-Fi"
+
+    if "tech/sci-fi" in lower:
+        return "Tech/Sci-Fi"
+
+    return category.strip()
 
 
 def normalize_category(category):
@@ -282,22 +356,6 @@ def normalize_category(category):
 
         if category.lower() == alias.lower():
             return target
-
-    category = re.sub(
-        r"\s+under\s+7k.*",
-        " Under 7K",
-        category,
-        flags=re.IGNORECASE
-    )
-
-    category = re.sub(
-        r"\s+over\s+7k.*",
-        " Over 7K",
-        category,
-        flags=re.IGNORECASE
-    )
-
-    category = category.strip()
 
     return category
 
@@ -323,7 +381,6 @@ def resolve_category(raw_category, allowed_categories):
             return allowed
 
     return category
-
 
 # =========================================================
 # FIELD EXTRACTION
@@ -392,7 +449,6 @@ def extract_post_date(article):
     )
 
     return clean(value)
-
 
 # =========================================================
 # SUPABASE
