@@ -4,6 +4,23 @@
 
 SOURCES = [
 
+ {
+        "url": "https://forums.homecomingservers.com/topic/64462-2026-homecoming-base-contest-rules-entries-thread/",
+        "event_name": "2026 HC Base Contest",
+        "event_type": "contest",
+        "allowed_categories": [
+            "Silver",
+            "Gold",
+            
+        ],
+        "fields": {
+            "supergroup_name": "Your Base's Name:",
+            "shard": "The Shard It Is Located On:",
+            "base_code": "The Passcode for Entry:",
+            "category": "Tier Entering: :"
+        }
+    },
+    
     {
         "url": "https://forums.homecomingservers.com/topic/62785-list-your-base-for-the-noncompetitive-our-based-showcase/",
         "event_name": "Noncompetitive Base Showcase",
