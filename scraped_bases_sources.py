@@ -17,7 +17,7 @@ SOURCES = [
             "supergroup_name": "Your Base's Name:",
             "shard": "The Shard It Is Located On:",
             "base_code": "The Passcode for Entry:",
-            "category": "Tier Entering: :"
+            "category": "Tier Entering:"
         }
     },
     
