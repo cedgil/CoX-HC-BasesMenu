@@ -374,24 +374,26 @@ def normalize_category(category, allowed_categories=None):
     # =====================================================
 
     keywords = {
-
-        "fantasy": "Fantasy",
-        "arcane": "Fantasy/Arcane",
-        "tech": "Tech/Sci-Fi",
-        "sci": "Tech/Sci-Fi",
-        "realism": "Realism",
-        "freeform": "Freeform",
-        "free form": "Freeform",
-        "novice": "Novice",
-        "club": "Clubs and Venues",
-        "venue": "Clubs and Venues",
-        "headquarters": "Supergroup Headquarters",
-        "utility": "Utility",
-        "transit": "Transit Hub",
-        "travel hub": "Transit Hub",
-        "rp": "RP"
-
-    }
+    "fantasy": "Fantasy",
+    "arcane": "Fantasy/Arcane",
+    "tech": "Tech/Sci-Fi",
+    "sci": "Tech/Sci-Fi",
+    "realism": "Realism",
+    "freeform": "Freeform",
+    "free form": "Freeform",
+    "novice": "Novice",
+    "club": "Clubs and Venues",
+    "venue": "Clubs and Venues",
+    "headquarters": "Supergroup Headquarters",
+    "utility": "Utility",
+    "transit": "Transit Hub",
+    "travel hub": "Transit Hub",
+    "rp": "RP",
+    "seasonal": "Seasonal",
+    "nature": "Nature",
+    "floating": "Floating Islands",
+    "functional": "Functional"
+}
 
     for keyword, target in keywords.items():
 
