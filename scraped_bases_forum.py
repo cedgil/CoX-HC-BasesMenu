@@ -191,7 +191,24 @@ def clean(text):
         return ""
 
     text = text.replace("\u00a0", " ")
-    text = re.sub(r"\s+", " ", text)
+
+    text = re.sub(
+        r"\s+",
+        " ",
+        text
+    )
+
+    text = text.strip()
+
+    # ============================================
+    # remove trailing forum separators
+    # ============================================
+
+    text = re.sub(
+        r"\s*[-–—]+\s*$",
+        "",
+        text
+    )
 
     return text.strip()
 
