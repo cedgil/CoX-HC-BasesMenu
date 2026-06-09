@@ -699,7 +699,8 @@ def scrape_source(source):
                 )
 
                 parsed["category"] = normalize_category(
-                    parsed.get("category")
+                    parsed.get("category"),
+                    source.get("allowed_categories", [])
                 )
 
                 parsed["description"] = extract_description(chunk)
