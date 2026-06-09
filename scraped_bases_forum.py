@@ -406,8 +406,12 @@ def normalize_category(category, allowed_categories=None):
     # FALLBACK
     # =====================================================
 
-    if len(category) <= 45:
-        return category
+    for allowed in allowed_categories:
+
+        first_word = allowed.lower().split()[0]
+
+        if first_word in lower:
+            return allowed
 
     return None
 
