@@ -278,10 +278,13 @@ CATEGORY_STOP_MARKERS = [
 ]
 
 
-def normalize_category(category):
+def normalize_category(category, allowed_categories=None):
 
     if not category:
         return None
+
+    if allowed_categories is None:
+        allowed_categories = []
 
     category = clean(category)
 
@@ -319,52 +322,94 @@ def normalize_category(category):
     lower = category.lower()
 
     # =====================================================
-    # SPECIAL FIXES
-    # =====================================================
-
-    if "realism" in lower:
-        return "Realism"
-
-    if "clubs and venues" in lower:
-        return "Clubs and Venues"
-
-    if "free form" in lower or "freeform" in lower:
-        return "Freeform"
-
-    if (
-        "other" in lower
-        and (
-            "misc" in lower
-            or "miscellaneous" in lower
-        )
-    ):
-        return "Other/Misc"
-
-    if (
-        "utility" in lower
-        and "7000" in lower
-    ):
-        return "Utility Under 7000"
-
-    # =====================================================
     # ALIASES
     # =====================================================
 
     alias = CATEGORY_ALIASES.get(lower)
 
     if alias:
-        return alias
+
+        category = alias
+        lower = category.lower()
+
+    else:
+
+        for alias_key, alias_value in CATEGORY_ALIASES.items():
+
+            if lower.startswith(alias_key):
+
+                category = alias_value
+                lower = category.lower()
+                break
 
     # =====================================================
-    # PREFIX MATCH
+    # EXACT MATCH
     # =====================================================
 
-    for alias_key, alias_value in CATEGORY_ALIASES.items():
+    for allowed in allowed_categories:
 
-        if lower.startswith(alias_key):
-            return alias_value
+        if lower == allowed.lower():
+            return allowed
 
-    return category.title()
+    # =====================================================
+    # CONTAINS MATCH
+    # =====================================================
+
+    for allowed in allowed_categories:
+
+        if allowed.lower() in lower:
+            return allowed
+
+    # =====================================================
+    # REVERSE CONTAINS
+    # =====================================================
+
+    for allowed in allowed_categories:
+
+        if lower in allowed.lower():
+            return allowed
+
+    # =====================================================
+    # KEYWORD MATCH
+    # =====================================================
+
+    keywords = {
+
+        "fantasy": "Fantasy",
+        "arcane": "Fantasy/Arcane",
+        "tech": "Tech/Sci-Fi",
+        "sci": "Tech/Sci-Fi",
+        "realism": "Realism",
+        "freeform": "Freeform",
+        "free form": "Freeform",
+        "novice": "Novice",
+        "club": "Clubs and Venues",
+        "venue": "Clubs and Venues",
+        "headquarters": "Supergroup Headquarters",
+        "utility": "Utility",
+        "transit": "Transit Hub",
+        "travel hub": "Transit Hub",
+        "rp": "RP"
+
+    }
+
+    for keyword, target in keywords.items():
+
+        if keyword in lower:
+
+            for allowed in allowed_categories:
+
+                if target.lower() in allowed.lower():
+                    return allowed
+
+    # =====================================================
+    # FALLBACK
+    # =====================================================
+
+    if len(category) <= 45:
+        return category
+
+    return None
 
 
 # =========================================================
