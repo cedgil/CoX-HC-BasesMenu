@@ -773,15 +773,27 @@ def scrape_source(source):
                 if parsed["shard"] not in VALID_SHARDS:
                     continue
 
-                parsed["base_code"] = clean(
-                    parsed["base_code"]
-                )
+print("================================")
+print("RAW BASE CODE")
+print(repr(parsed["base_code"]))
+print("================================")
 
-                parsed["base_code"] = (
-                    parsed["base_code"]
-                    .split(" ")[0]
-                    .strip()
-                )
+parsed["base_code"] = clean(
+    parsed["base_code"]
+)
+
+print("AFTER CLEAN")
+print(repr(parsed["base_code"]))
+
+parsed["base_code"] = (
+    parsed["base_code"]
+    .split(" ")[0]
+    .strip()
+)
+
+print("FINAL BASE CODE")
+print(repr(parsed["base_code"]))
+print("================================")
 
                 if not re.match(
                     r"^[A-Z0-9\-]+$",
