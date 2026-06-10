@@ -778,17 +778,17 @@ def scrape_source(source):
                 print(repr(parsed["base_code"]))
                 print("================================")
                 
-                if parsed["base_code"].endswith("-"):
+            if parsed["base_code"].endswith("-"):
 
-                    m = re.search(
+                m = re.search(
                     r"([A-Za-z0-9\-]+-)\s*\n?\s*(\d{4,6})",
                     chunk,
                     re.IGNORECASE
-                    )
+                )
 
                 if m:
                     parsed["base_code"] = (
-                    m.group(1) + m.group(2)
+                        m.group(1) + m.group(2)
                     )
 
                 print("AFTER CLEAN")
