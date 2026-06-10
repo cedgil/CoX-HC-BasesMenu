@@ -777,9 +777,9 @@ def scrape_source(source):
                 print("RAW BASE CODE")
                 print(repr(parsed.get("base_code")))
                 print("================================")
-        
+
                 if parsed.get("base_code") and parsed["base_code"].endswith("-"):
-                
+
                     m = re.search(
                         r"([A-Za-z0-9\-]+-)\s*\n?\s*(\d{4,6})",
                         chunk,
@@ -790,22 +790,22 @@ def scrape_source(source):
                         parsed["base_code"] = (
                             m.group(1) + m.group(2)
                         )
-
+                
                 print("AFTER CLEAN")
                 print(repr(parsed.get("base_code")))
-        
+                
                 if parsed.get("base_code"):
                 
-                    parsed["base_code"] = (
+                    parsed["base_code"] = re.sub(
+                        r"\s+",
+                        "",
                         parsed["base_code"]
-                        .split(" ")[0]
-                        .strip()
-                    )
-
+                    ).strip()
+                
                 print("FINAL BASE CODE")
                 print(repr(parsed.get("base_code")))
                 print("================================")
-
+    
                 if not re.match(
                     r"^[A-Z0-9\-]+$",
                     parsed["base_code"],
