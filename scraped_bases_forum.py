@@ -775,33 +775,35 @@ def scrape_source(source):
 
                 print("================================")
                 print("RAW BASE CODE")
-                print(repr(parsed["base_code"]))
+                print(repr(parsed.get("base_code")))
                 print("================================")
+        
+                if parsed.get("base_code") and parsed["base_code"].endswith("-"):
                 
-            if parsed["base_code"].endswith("-"):
-
-                m = re.search(
-                    r"([A-Za-z0-9\-]+-)\s*\n?\s*(\d{4,6})",
-                    chunk,
-                    re.IGNORECASE
-                )
-
-                if m:
-                    parsed["base_code"] = (
-                        m.group(1) + m.group(2)
+                    m = re.search(
+                        r"([A-Za-z0-9\-]+-)\s*\n?\s*(\d{4,6})",
+                        chunk,
+                        re.IGNORECASE
                     )
 
-                print("AFTER CLEAN")
-                print(repr(parsed["base_code"]))
+                    if m:
+                        parsed["base_code"] = (
+                            m.group(1) + m.group(2)
+                        )
 
-                parsed["base_code"] = (
-                    parsed["base_code"]
-                    .split(" ")[0]
-                    .strip()
-                )
-    
+                print("AFTER CLEAN")
+                print(repr(parsed.get("base_code")))
+        
+                if parsed.get("base_code"):
+                
+                    parsed["base_code"] = (
+                        parsed["base_code"]
+                        .split(" ")[0]
+                        .strip()
+                    )
+
                 print("FINAL BASE CODE")
-                print(repr(parsed["base_code"]))
+                print(repr(parsed.get("base_code")))
                 print("================================")
 
                 if not re.match(
