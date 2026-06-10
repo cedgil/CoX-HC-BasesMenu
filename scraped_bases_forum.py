@@ -456,18 +456,18 @@ def extract_field(raw_text, label):
     if not match:
         return None
 
-value = clean(match.group(1))
+    value = clean(match.group(1))
 
-value = value.strip()
+    value = value.strip()
 
-if (
-    len(value) >= 2
-    and value[0] == '"'
-    and value[-1] == '"'
-):
-    value = value[1:-1].strip()
+    if (
+        len(value) >= 2
+        and value[0] == '"'
+        and value[-1] == '"'
+    ):
+        value = value[1:-1].strip()
 
-return value
+    return value
 
 
 def extract_description(raw_text):
