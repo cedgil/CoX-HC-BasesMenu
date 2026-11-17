@@ -382,5 +382,12 @@
     "link": "https://forums.homecomingservers.com/topic/66355-a-geodesic-sphere-attempt",
     "summary": "I doubt this even counts as base building, but I was thinking about structures that might be possible to build now, and thought \"geodesic domes are a thing\", but not being a hippy, I didn't know anything about them. Twenty-four hours and multiple google searches later, I generated bind files (lol doing this by hand) for a 2V sphere, to create this from 80 64x64 collision tiles. The structure has a 97' radius, so it's hard to see the scope in a screenshot.\u00a0 The corners aren't perfect triangles be",
     "date": "2026-11-08T03:31:01Z"
+  },
+  {
+    "forum": "Base Construction",
+    "title": "Rotation Angles From Unit Vectors",
+    "link": "https://forums.homecomingservers.com/topic/66460-rotation-angles-from-unit-vectors",
+    "summary": "CONTENT WARNING: May trigger flashbacks to high school linear algebra and trigonometry classes. Ah, base editor, my friend and foe. In a world of right-handed coordinate systems, of AI generated 3D meshes, of vectors and faces and normals, you are a left-handed, red-headed stepchild espousing Euler angles both in left- and right-handed directions. Can we bridge this divide? Yes, yes we can. The problem: You can describe an object's orientation using unit vectors x', y', z', but need to know pitc",
+    "date": "2026-11-16T21:23:53Z"
   }
 ]
